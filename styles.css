@@ -4270,9 +4270,11 @@ body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) 
 /* Model Selector */
 .llm-hub-model-selector {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  padding: 2px 0;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--background-modifier-border);
 }
 
 .llm-hub-model-label {
@@ -4283,30 +4285,20 @@ body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) 
 
 .llm-hub-model-dropdown {
   font-size: 11px;
-  padding: 1px 4px;
+  padding: 2px 18px 2px 6px;
   border: 1px solid var(--background-modifier-border);
   border-radius: 4px;
   background: var(--background-primary);
   color: var(--text-normal);
   max-width: 200px;
-  min-width: 0;
-}
-
-.llm-hub-rag-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
+  min-width: 60px;
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23888'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 4px center;
+  background-size: 8px 5px;
   cursor: pointer;
-  margin-left: 4px;
-}
-
-.llm-hub-rag-toggle input[type="checkbox"] {
-  margin: 0;
-}
-
-.llm-hub-rag-label {
-  font-size: 11px;
-  color: var(--text-muted);
 }
 
 /* Skills Selector */
