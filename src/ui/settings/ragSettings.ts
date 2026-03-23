@@ -147,28 +147,39 @@ function displaySelectedRagSetting(
       })
   );
 
-  // External index path (save on blur to avoid writing every keystroke)
+  // External index toggle
   new Setting(containerEl)
-    .setName(t("settings.ragExternalIndexPath"))
-    .setDesc(t("settings.ragExternalIndexPathDesc"))
-    .addText((text) => {
-      text
-        .setPlaceholder(t("settings.ragExternalIndexPathPlaceholder"))
-        .setValue(ragSetting.externalIndexPath || "");
-      text.inputEl.addClass("llm-hub-wide-input");
-      text.inputEl.addEventListener("blur", () => {
-        const trimmed = text.inputEl.value.trim();
-        if (trimmed !== (ragSetting.externalIndexPath || "")) {
-          void updateSetting({ externalIndexPath: trimmed }).then(() => {
-            getRagStore().setExternalPath(name, trimmed);
-          }).catch((err) => new Notice(String(err)));
-        }
-        const newIsExternal = !!trimmed;
-        if (newIsExternal !== isExternal) {
+    .setName(t("settings.ragExternalIndex"))
+    .setDesc(t("settings.ragExternalIndexDesc"))
+    .addToggle((toggle) =>
+      toggle.setValue(isExternal).onChange((value) => {
+        void (async () => {
+          await updateSetting({ externalIndexPath: value ? " " : "" });
+          getRagStore().setExternalPath(name, value ? " " : "");
           display();
-        }
+        })();
+      })
+    );
+
+  if (isExternal) {
+    // External index path
+    new Setting(containerEl)
+      .setName(t("settings.ragExternalIndexPath"))
+      .setDesc(t("settings.ragExternalIndexPathDesc"))
+      .addText((text) => {
+        text
+          .setPlaceholder(t("settings.ragExternalIndexPathPlaceholder"))
+          .setValue(ragSetting.externalIndexPath.trim())
+          .onChange((value) => {
+            void (async () => {
+              const path = value.trim() || " "; // keep toggle on
+              await updateSetting({ externalIndexPath: path });
+              getRagStore().setExternalPath(name, path);
+            })().catch((err) => new Notice(String(err)));
+          });
+        text.inputEl.addClass("llm-hub-wide-input");
       });
-    });
+  }
 
   // Embedding server URL
   new Setting(containerEl)
