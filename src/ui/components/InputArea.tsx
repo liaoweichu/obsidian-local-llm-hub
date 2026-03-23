@@ -25,9 +25,9 @@ interface InputAreaProps {
   currentModel: string;
   availableModels: string[];
   onModelChange: (model: string) => void;
-  ragEnabled: boolean;
-  ragAvailable: boolean;
-  onRagToggle: (enabled: boolean) => void;
+  ragSettingNames: string[];
+  selectedRagSetting: string | null;
+  onRagSettingChange: (setting: string | null) => void;
   vaultToolMode: VaultToolMode;
   onVaultToolModeChange: (mode: VaultToolMode) => void;
   mcpServerInfos: McpServerInfo[];
@@ -72,9 +72,9 @@ const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(function InputArea
   currentModel,
   availableModels,
   onModelChange,
-  ragEnabled,
-  ragAvailable,
-  onRagToggle,
+  ragSettingNames,
+  selectedRagSetting,
+  onRagSettingChange,
   vaultToolMode,
   onVaultToolModeChange,
   mcpServerInfos,
@@ -570,7 +570,7 @@ const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(function InputArea
       </div>
 
       {/* Model & RAG selector */}
-      {(availableModels.length > 1 || ragAvailable) && (
+      {(availableModels.length > 1 || ragSettingNames.length > 0) && (
         <div className="llm-hub-model-selector">
           {availableModels.length > 1 && (
             <>
@@ -587,16 +587,21 @@ const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(function InputArea
               </select>
             </>
           )}
-          {ragAvailable && (
-            <label className="llm-hub-rag-toggle">
-              <input
-                type="checkbox"
-                checked={ragEnabled}
-                onChange={(e) => onRagToggle(e.target.checked)}
+          {ragSettingNames.length > 0 && (
+            <>
+              <label className="llm-hub-model-label">RAG</label>
+              <select
+                className="llm-hub-model-dropdown"
+                value={selectedRagSetting || ""}
+                onChange={(e) => onRagSettingChange(e.target.value || null)}
                 disabled={isLoading}
-              />
-              <span className="llm-hub-rag-label">RAG</span>
-            </label>
+              >
+                <option value="">{t("settings.ragNone")}</option>
+                {ragSettingNames.map((name) => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+              </select>
+            </>
           )}
         </div>
       )}

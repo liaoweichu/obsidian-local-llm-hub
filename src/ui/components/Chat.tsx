@@ -57,7 +57,8 @@ export default function Chat({ plugin }: ChatProps) {
   const [saveNoteState, setSaveNoteState] = useState<"idle" | "saving" | "saved">("idle");
 
   const [currentModel, setCurrentModel] = useState(plugin.settings.llmConfig.model);
-  const [ragEnabled, setRagEnabled] = useState(true);
+  const [ragSettingNames, setRagSettingNames] = useState<string[]>(plugin.getRagSettingNames());
+  const [selectedRagSetting, setSelectedRagSetting] = useState<string | null>(plugin.getSelectedRagSettingName());
   const [vaultToolMode, setVaultToolMode] = useState<VaultToolMode>("all");
   const [vaultFiles, setVaultFiles] = useState<string[]>([]);
   const [hasSelection, setHasSelection] = useState(false);
@@ -73,8 +74,7 @@ export default function Chat({ plugin }: ChatProps) {
 
   const baseLlmConfig = plugin.settings.llmConfig;
   const llmConfig = { ...baseLlmConfig, model: currentModel || baseLlmConfig.model };
-  const ragConfig = plugin.settings.ragConfig;
-  const ragAvailable = ragConfig.enabled;
+  const ragAvailable = ragSettingNames.length > 0;
   const availableModels = plugin.settings.availableModels || [];
 
   // Auto-scroll to bottom
@@ -88,10 +88,21 @@ export default function Chat({ plugin }: ChatProps) {
       refreshVaultFiles();
       // Sync model if changed externally (e.g. in settings)
       setCurrentModel(plugin.settings.llmConfig.model);
+      // Sync RAG settings
+      setRagSettingNames(plugin.getRagSettingNames());
+      setSelectedRagSetting(plugin.getSelectedRagSettingName());
+    };
+    const onRagChanged = () => {
+      setRagSettingNames(plugin.getRagSettingNames());
+      setSelectedRagSetting(plugin.getSelectedRagSettingName());
     };
     plugin.settingsEmitter.on("settings-updated", onSettingsUpdate);
+    plugin.settingsEmitter.on("rag-setting-changed", onRagChanged);
+    plugin.settingsEmitter.on("workspace-state-loaded", onRagChanged);
     return () => {
       plugin.settingsEmitter.off("settings-updated", onSettingsUpdate);
+      plugin.settingsEmitter.off("rag-setting-changed", onRagChanged);
+      plugin.settingsEmitter.off("workspace-state-loaded", onRagChanged);
     };
   }, [plugin]);
 
@@ -494,25 +505,28 @@ export default function Chat({ plugin }: ChatProps) {
 
       // RAG context injection
       let ragSources: string[] | undefined;
-      if (ragEnabled && ragAvailable) {
-        try {
-          const store = getRagStore();
-          const results = await store.search(
-            resolvedContent,
-            ragConfig,
-            llmConfig,
-            plugin.app,
-            WORKSPACE_FOLDER,
-          );
-          if (results.length > 0) {
-            ragSources = [...new Set(results.map(r => r.filePath))];
-            const ragContext = results
-              .map(r => `[Source: ${r.filePath}]\n${r.text}`)
-              .join("\n\n---\n\n");
-            systemPrompt += `\n\nRelevant context from user's notes (use this to answer the question):\n\n${ragContext}`;
+      if (selectedRagSetting) {
+        const ragSetting = plugin.getRagSetting(selectedRagSetting);
+        if (ragSetting) {
+          try {
+            const store = getRagStore();
+            const results = await store.search(
+              selectedRagSetting,
+              resolvedContent,
+              ragSetting,
+              llmConfig,
+              plugin.app,
+            );
+            if (results.length > 0) {
+              ragSources = [...new Set(results.map(r => r.filePath))];
+              const ragContext = results
+                .map(r => `[Source: ${r.filePath}]\n${r.text}`)
+                .join("\n\n---\n\n");
+              systemPrompt += `\n\nRelevant context from user's notes (use this to answer the question):\n\n${ragContext}`;
+            }
+          } catch (err) {
+            console.warn("RAG search failed:", formatError(err));
           }
-        } catch (err) {
-          console.warn("RAG search failed:", formatError(err));
         }
       }
 
@@ -710,7 +724,7 @@ export default function Chat({ plugin }: ChatProps) {
       setIsLoading(false);
       abortControllerRef.current = null;
     }
-  }, [messages, plugin, llmConfig, ragConfig, ragEnabled, vaultToolMode, ragAvailable, resolveMessageVariables, saveCurrentChat, activeSkillPaths, availableSkills, enabledMcpServerIds]);
+  }, [messages, plugin, llmConfig, selectedRagSetting, vaultToolMode, ragAvailable, resolveMessageVariables, saveCurrentChat, activeSkillPaths, availableSkills, enabledMcpServerIds]);
 
   return (
     <div className="llm-hub-chat">
@@ -803,9 +817,12 @@ export default function Chat({ plugin }: ChatProps) {
         currentModel={currentModel}
         availableModels={availableModels}
         onModelChange={handleModelChange}
-        ragEnabled={ragEnabled}
-        ragAvailable={ragAvailable}
-        onRagToggle={setRagEnabled}
+        ragSettingNames={ragSettingNames}
+        selectedRagSetting={selectedRagSetting}
+        onRagSettingChange={(setting) => {
+          setSelectedRagSetting(setting);
+          void plugin.selectRagSetting(setting);
+        }}
         vaultToolMode={vaultToolMode}
         onVaultToolModeChange={setVaultToolMode}
         vaultFiles={vaultFiles}

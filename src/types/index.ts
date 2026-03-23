@@ -20,29 +20,55 @@ export const DEFAULT_LOCAL_LLM_CONFIG: LocalLlmConfig = {
   model: "",
 };
 
-// Local RAG configuration
-export interface RagConfig {
-  enabled: boolean;
+// Named RAG setting (one per index)
+export interface RagSetting {
   embeddingModel: string;       // e.g. "nomic-embed-text"
-  embeddingBaseUrl?: string;    // separate embedding server URL (empty = same as LLM)
-  targetFolders: string[];      // folders to index (empty = all)
-  excludePatterns: string[];    // regex patterns to exclude
+  embeddingBaseUrl: string;     // separate embedding server URL (empty = same as LLM)
   chunkSize: number;            // characters per chunk
   chunkOverlap: number;         // overlap between chunks
   topK: number;                 // number of results to retrieve
   minScore: number;             // minimum cosine similarity score to include (0.0-1.0)
+  targetFolders: string[];      // folders to index (empty = all)
+  excludePatterns: string[];    // regex patterns to exclude
+  externalIndexPath: string;    // absolute path to external index directory (empty = vault sync)
 }
 
-export const DEFAULT_RAG_CONFIG: RagConfig = {
-  enabled: false,
+export const DEFAULT_RAG_SETTING: RagSetting = {
   embeddingModel: "nomic-embed-text",
-  targetFolders: [],
-  excludePatterns: [],
+  embeddingBaseUrl: "",
   chunkSize: 1000,
   chunkOverlap: 200,
   topK: 5,
   minScore: 0.3,
+  targetFolders: [],
+  excludePatterns: [],
+  externalIndexPath: "",
 };
+
+// Workspace state (persisted in workspace-state.json)
+export interface WorkspaceState {
+  selectedRagSetting: string | null;
+  ragSettings: Record<string, RagSetting>;
+}
+
+export const DEFAULT_WORKSPACE_STATE: WorkspaceState = {
+  selectedRagSetting: null,
+  ragSettings: {},
+};
+
+/** @deprecated Use RagSetting instead. Kept for migration from old settings. */
+export interface RagConfig {
+  enabled: boolean;
+  embeddingModel: string;
+  embeddingBaseUrl?: string;
+  targetFolders: string[];
+  excludePatterns: string[];
+  chunkSize: number;
+  chunkOverlap: number;
+  topK: number;
+  minScore: number;
+  externalIndexPath?: string;
+}
 
 // Tool definitions (OpenAI-compatible format, shared by Ollama and LM Studio)
 export interface ToolDefinition {
@@ -185,7 +211,8 @@ export interface LocalLlmHubSettings {
   llmConfig: LocalLlmConfig;
   llmVerified: boolean;
   availableModels: string[];
-  ragConfig: RagConfig;
+  /** @deprecated Kept for migration only. Use WorkspaceState.ragSettings instead. */
+  ragConfig?: RagConfig;
   saveChatHistory: boolean;
   systemPrompt: string;
   encryption: EncryptionSettings;
@@ -209,7 +236,6 @@ export const DEFAULT_SETTINGS: LocalLlmHubSettings = {
   llmConfig: DEFAULT_LOCAL_LLM_CONFIG,
   llmVerified: false,
   availableModels: [],
-  ragConfig: DEFAULT_RAG_CONFIG,
   saveChatHistory: true,
   systemPrompt: "",
   encryption: { ...DEFAULT_ENCRYPTION_SETTINGS },

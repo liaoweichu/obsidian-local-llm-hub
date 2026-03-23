@@ -5,7 +5,7 @@
  */
 
 import { requestUrl } from "obsidian";
-import type { LocalLlmConfig, RagConfig } from "../types";
+import type { LocalLlmConfig, RagSetting } from "../types";
 
 interface EmbeddingResponse {
   data: { embedding: number[]; index: number }[];
@@ -14,10 +14,10 @@ interface EmbeddingResponse {
 
 /**
  * Get the embedding server base URL.
- * Uses ragConfig.embeddingBaseUrl if set, otherwise falls back to LLM server.
+ * Uses ragSetting.embeddingBaseUrl if set, otherwise falls back to LLM server.
  */
-function getEmbeddingBaseUrl(ragConfig: RagConfig, llmConfig: LocalLlmConfig): string {
-  return ragConfig.embeddingBaseUrl || llmConfig.baseUrl;
+function getEmbeddingBaseUrl(ragSetting: RagSetting, llmConfig: LocalLlmConfig): string {
+  return ragSetting.embeddingBaseUrl || llmConfig.baseUrl;
 }
 
 /**
@@ -25,22 +25,22 @@ function getEmbeddingBaseUrl(ragConfig: RagConfig, llmConfig: LocalLlmConfig): s
  */
 export async function generateEmbeddings(
   texts: string[],
-  ragConfig: RagConfig,
+  ragSetting: RagSetting,
   llmConfig: LocalLlmConfig,
 ): Promise<number[][]> {
-  const baseUrl = getEmbeddingBaseUrl(ragConfig, llmConfig);
+  const baseUrl = getEmbeddingBaseUrl(ragSetting, llmConfig);
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (llmConfig.apiKey) {
     headers["Authorization"] = `Bearer ${llmConfig.apiKey}`;
   }
 
-  const pathPrefix = !ragConfig.embeddingBaseUrl && llmConfig.framework === "anythingllm" ? "/v1/openai" : "/v1";
+  const pathPrefix = !ragSetting.embeddingBaseUrl && llmConfig.framework === "anythingllm" ? "/v1/openai" : "/v1";
   const response = await requestUrl({
     url: `${baseUrl}${pathPrefix}/embeddings`,
     method: "POST",
     headers,
     body: JSON.stringify({
-      model: ragConfig.embeddingModel,
+      model: ragSetting.embeddingModel,
       input: texts,
     }),
   });
@@ -56,9 +56,9 @@ export async function generateEmbeddings(
  */
 export async function generateEmbedding(
   text: string,
-  ragConfig: RagConfig,
+  ragSetting: RagSetting,
   llmConfig: LocalLlmConfig,
 ): Promise<number[]> {
-  const results = await generateEmbeddings([text], ragConfig, llmConfig);
+  const results = await generateEmbeddings([text], ragSetting, llmConfig);
   return results[0];
 }

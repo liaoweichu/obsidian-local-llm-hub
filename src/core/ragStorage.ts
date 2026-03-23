@@ -1,10 +1,11 @@
 /**
  * RAG Storage
  * Persists vector embeddings as Float32Array binary files
- * with JSON metadata sidecar
+ * with JSON metadata sidecar, per named setting
  */
 
 import type { App } from "obsidian";
+import { WORKSPACE_FOLDER } from "../types";
 
 export interface ChunkMeta {
   filePath: string;
@@ -19,37 +20,57 @@ export interface RagIndex {
   embeddingFormatVersion?: number;
 }
 
+const RAG_DIR = `${WORKSPACE_FOLDER}/rag`;
 const META_FILE = "rag-index.json";
 const VECTORS_FILE = "rag-vectors.bin";
 
+export function sanitizeSettingName(name: string): string {
+  return name.replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
+function getNodeRequire(): ((id: string) => unknown) | null {
+  const loader =
+    (globalThis as unknown as { require?: (id: string) => unknown }).require ||
+    (globalThis as unknown as { module?: { require?: (id: string) => unknown } }).module?.require;
+  return loader || null;
+}
+
+function getSettingDir(settingName: string): string {
+  return `${RAG_DIR}/${sanitizeSettingName(settingName)}`;
+}
+
+function getIndexPath(settingName: string): string {
+  return `${getSettingDir(settingName)}/${META_FILE}`;
+}
+
+function getVectorsPath(settingName: string): string {
+  return `${getSettingDir(settingName)}/${VECTORS_FILE}`;
+}
+
+async function ensureDir(app: App, dirPath: string): Promise<void> {
+  for (const seg of [WORKSPACE_FOLDER, RAG_DIR, dirPath]) {
+    if (!(await app.vault.adapter.exists(seg))) {
+      await app.vault.createFolder(seg);
+    }
+  }
+}
+
 /**
- * Save RAG index to vault
+ * Save RAG index to vault (per setting name)
  */
 export async function saveRagIndex(
   app: App,
-  workspaceFolder: string,
+  settingName: string,
   index: RagIndex,
   vectors: Float32Array,
 ): Promise<void> {
-  const folder = `${workspaceFolder}/rag`;
+  const dirPath = getSettingDir(settingName);
+  await ensureDir(app, dirPath);
 
-  // Ensure folder exists
-  if (!app.vault.getAbstractFileByPath(folder)) {
-    await app.vault.createFolder(folder);
-  }
+  const indexPath = getIndexPath(settingName);
+  await app.vault.adapter.write(indexPath, JSON.stringify(index));
 
-  // Save metadata as JSON
-  const metaPath = `${folder}/${META_FILE}`;
-  const metaJson = JSON.stringify(index);
-  const existingMeta = app.vault.getAbstractFileByPath(metaPath);
-  if (existingMeta) {
-    await app.vault.adapter.write(metaPath, metaJson);
-  } else {
-    await app.vault.create(metaPath, metaJson);
-  }
-
-  // Save vectors as binary
-  const vectorsPath = `${folder}/${VECTORS_FILE}`;
+  const vectorsPath = getVectorsPath(settingName);
   const buffer = vectors.buffer.slice(
     vectors.byteOffset,
     vectors.byteOffset + vectors.byteLength,
@@ -58,43 +79,182 @@ export async function saveRagIndex(
 }
 
 /**
- * Load RAG index from vault
+ * Load RAG index from vault (per setting name)
  */
 export async function loadRagIndex(
   app: App,
-  workspaceFolder: string,
-): Promise<{ index: RagIndex; vectors: Float32Array } | null> {
-  const folder = `${workspaceFolder}/rag`;
-  const metaPath = `${folder}/${META_FILE}`;
-  const vectorsPath = `${folder}/${VECTORS_FILE}`;
-
+  settingName: string,
+): Promise<RagIndex | null> {
+  const indexPath = getIndexPath(settingName);
   try {
-    const metaContent = await app.vault.adapter.read(metaPath);
-    const index = JSON.parse(metaContent) as RagIndex;
-
-    const vectorBuffer = await app.vault.adapter.readBinary(vectorsPath);
-    const vectors = new Float32Array(vectorBuffer);
-
-    return { index, vectors };
+    if (!(await app.vault.adapter.exists(indexPath))) return null;
+    const content = await app.vault.adapter.read(indexPath);
+    return JSON.parse(content) as RagIndex;
   } catch {
     return null;
   }
 }
 
 /**
- * Delete RAG index from vault
+ * Load RAG vectors from vault (per setting name)
+ */
+export async function loadRagVectors(
+  app: App,
+  settingName: string,
+): Promise<Float32Array | null> {
+  const vectorsPath = getVectorsPath(settingName);
+  try {
+    if (!(await app.vault.adapter.exists(vectorsPath))) return null;
+    const buffer = await app.vault.adapter.readBinary(vectorsPath);
+    return new Float32Array(buffer);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Delete RAG index from vault (per setting name)
  */
 export async function deleteRagIndex(
   app: App,
-  workspaceFolder: string,
+  settingName: string,
 ): Promise<void> {
-  const folder = `${workspaceFolder}/rag`;
-
-  for (const fileName of [META_FILE, VECTORS_FILE]) {
-    const path = `${folder}/${fileName}`;
-    const file = app.vault.getAbstractFileByPath(path);
-    if (file) {
-      await app.fileManager.trashFile(file);
+  const dirPath = getSettingDir(settingName);
+  const indexPath = getIndexPath(settingName);
+  const vectorsPath = getVectorsPath(settingName);
+  try {
+    if (await app.vault.adapter.exists(indexPath)) {
+      await app.vault.adapter.remove(indexPath);
     }
+    if (await app.vault.adapter.exists(vectorsPath)) {
+      await app.vault.adapter.remove(vectorsPath);
+    }
+    if (await app.vault.adapter.exists(dirPath)) {
+      await app.vault.adapter.rmdir(dirPath, true);
+    }
+  } catch {
+    // Ignore deletion errors
+  }
+}
+
+/**
+ * Rename RAG index directory from old setting name to new setting name.
+ * Copies files to new directory and removes old directory.
+ */
+export async function renameRagIndex(
+  app: App,
+  oldSettingName: string,
+  newSettingName: string,
+): Promise<void> {
+  const oldDir = getSettingDir(oldSettingName);
+  const newDir = getSettingDir(newSettingName);
+  const oldIndex = getIndexPath(oldSettingName);
+  const oldVectors = getVectorsPath(oldSettingName);
+
+  try {
+    if (!(await app.vault.adapter.exists(oldIndex))) return;
+
+    await ensureDir(app, newDir);
+
+    // Copy index
+    const indexContent = await app.vault.adapter.read(oldIndex);
+    await app.vault.adapter.write(getIndexPath(newSettingName), indexContent);
+
+    // Copy vectors
+    if (await app.vault.adapter.exists(oldVectors)) {
+      const vectorBuffer = await app.vault.adapter.readBinary(oldVectors);
+      await app.vault.adapter.writeBinary(getVectorsPath(newSettingName), vectorBuffer);
+    }
+
+    // Remove old
+    await app.vault.adapter.remove(oldIndex);
+    if (await app.vault.adapter.exists(oldVectors)) {
+      await app.vault.adapter.remove(oldVectors);
+    }
+    if (await app.vault.adapter.exists(oldDir)) {
+      await app.vault.adapter.rmdir(oldDir, true);
+    }
+  } catch {
+    // Best-effort rename
+  }
+}
+
+/**
+ * Migrate old flat storage (LocalLlmHub/rag/rag-index.json) to named setting directory.
+ * Returns true if migration was performed.
+ */
+export async function migrateOldRagIndex(
+  app: App,
+  settingName: string,
+): Promise<boolean> {
+  const oldIndexPath = `${RAG_DIR}/${META_FILE}`;
+  const oldVectorsPath = `${RAG_DIR}/${VECTORS_FILE}`;
+  try {
+    if (!(await app.vault.adapter.exists(oldIndexPath))) return false;
+
+    const dirPath = getSettingDir(settingName);
+    await ensureDir(app, dirPath);
+
+    // Copy old files to new location
+    const indexContent = await app.vault.adapter.read(oldIndexPath);
+    await app.vault.adapter.write(getIndexPath(settingName), indexContent);
+
+    if (await app.vault.adapter.exists(oldVectorsPath)) {
+      const vectorBuffer = await app.vault.adapter.readBinary(oldVectorsPath);
+      await app.vault.adapter.writeBinary(getVectorsPath(settingName), vectorBuffer);
+    }
+
+    // Remove old files
+    await app.vault.adapter.remove(oldIndexPath);
+    if (await app.vault.adapter.exists(oldVectorsPath)) {
+      await app.vault.adapter.remove(oldVectorsPath);
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Load RAG index from an external (absolute) directory path using Node.js fs.
+ */
+export async function loadExternalRagIndex(dirPath: string): Promise<RagIndex | null> {
+  try {
+    const loader = getNodeRequire();
+    const fs = loader?.("fs") as { promises: { readFile: (p: string, e: string) => Promise<string> } } | undefined;
+    const path = loader?.("path") as { join: (...args: string[]) => string } | undefined;
+    if (!fs || !path) return null;
+    const content = await fs.promises.readFile(path.join(dirPath, META_FILE), "utf-8");
+    const raw = JSON.parse(content);
+
+    // Normalize external index meta fields (e.g. file_path -> filePath, start_offset -> startOffset)
+    if (raw.meta && raw.meta.length > 0 && !("filePath" in raw.meta[0]) && ("file_path" in raw.meta[0])) {
+      raw.meta = raw.meta.map((m: Record<string, unknown>) => ({
+        filePath: m.file_path as string,
+        startOffset: (m.start_offset as number) ?? (m.startOffset as number) ?? 0,
+        text: (m.text as string) || "",
+      }));
+    }
+
+    return raw as RagIndex;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Load RAG vectors from an external (absolute) directory path using Node.js fs.
+ */
+export async function loadExternalRagVectors(dirPath: string): Promise<Float32Array | null> {
+  try {
+    const loader = getNodeRequire();
+    const fs = loader?.("fs") as { promises: { readFile: (p: string) => Promise<Buffer> } } | undefined;
+    const path = loader?.("path") as { join: (...args: string[]) => string } | undefined;
+    if (!fs || !path) return null;
+    const buffer = await fs.promises.readFile(path.join(dirPath, VECTORS_FILE));
+    return new Float32Array(buffer.buffer, buffer.byteOffset, buffer.byteLength / 4);
+  } catch {
+    return null;
   }
 }

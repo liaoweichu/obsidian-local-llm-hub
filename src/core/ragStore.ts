@@ -1,15 +1,20 @@
 /**
  * RAG Store
- * Manages chunking, embedding, indexing, and searching of vault notes
+ * Manages chunking, embedding, indexing, and searching of vault notes.
+ * Supports multiple named RAG settings, each with its own index.
  */
 
 import { type App, TFile } from "obsidian";
-import type { LocalLlmConfig, RagConfig } from "../types";
+import type { LocalLlmConfig, RagSetting } from "../types";
+import { WORKSPACE_FOLDER } from "../types";
 import { generateEmbeddings, generateEmbedding } from "./embeddingProvider";
 import {
   saveRagIndex,
   loadRagIndex,
+  loadRagVectors,
   deleteRagIndex,
+  loadExternalRagIndex,
+  loadExternalRagVectors,
   type RagIndex,
   type ChunkMeta,
 } from "./ragStorage";
@@ -27,57 +32,84 @@ export interface RagSearchResult {
   score: number;
 }
 
-class RagStore {
-  private index: RagIndex | null = null;
-  private vectors: Float32Array | null = null;
-  private loaded = false;
-  private incompatibleIndexLoaded = false;
+export interface RagStatus {
+  totalChunks: number;
+  indexedFiles: number;
+}
 
-  getStatus(): { totalChunks: number; indexedFiles: number } {
-    if (!this.index) {
+interface StoreEntry {
+  index: RagIndex | null;
+  vectors: Float32Array | null;
+  loaded: boolean;
+  incompatibleIndexLoaded: boolean;
+}
+
+interface LoadOptions {
+  externalIndexPath?: string;
+}
+
+class RagStore {
+  private entries = new Map<string, StoreEntry>();
+  private externalPaths = new Map<string, string>();
+
+  async load(app: App, settingNames: string[], ragSettings?: Record<string, RagSetting>): Promise<void> {
+    if (ragSettings) {
+      for (const [name, setting] of Object.entries(ragSettings)) {
+        if (setting.externalIndexPath) {
+          this.externalPaths.set(name, setting.externalIndexPath);
+        }
+      }
+    }
+    for (const name of settingNames) {
+      await this.ensureLoaded(app, name, { externalIndexPath: ragSettings?.[name]?.externalIndexPath });
+    }
+  }
+
+  setExternalPath(settingName: string, externalPath: string): void {
+    if (externalPath) {
+      this.externalPaths.set(settingName, externalPath);
+    } else {
+      this.externalPaths.delete(settingName);
+    }
+    // Invalidate cache so next access reloads
+    this.entries.delete(settingName);
+  }
+
+  invalidateEntry(settingName: string): void {
+    this.entries.delete(settingName);
+    this.externalPaths.delete(settingName);
+  }
+
+  getStatus(settingName: string): RagStatus {
+    const entry = this.entries.get(settingName);
+    if (!entry?.index) {
       return { totalChunks: 0, indexedFiles: 0 };
     }
     return {
-      totalChunks: this.index.meta.length,
-      indexedFiles: Object.keys(this.index.fileChecksums).length,
+      totalChunks: entry.index.meta.length,
+      indexedFiles: entry.index.fileChecksums ? Object.keys(entry.index.fileChecksums).length : 0,
     };
   }
 
-  /**
-   * Load existing index from vault storage
-   */
-  async load(app: App, workspaceFolder: string): Promise<void> {
-    if (this.loaded) return;
-    const result = await loadRagIndex(app, workspaceFolder);
-    this.incompatibleIndexLoaded = false;
-    if (result) {
-      if (result.index.embeddingFormatVersion === EMBEDDING_FORMAT_VERSION) {
-        this.index = result.index;
-        this.vectors = result.vectors;
-      } else {
-        this.index = null;
-        this.vectors = null;
-        this.incompatibleIndexLoaded = true;
-      }
-    }
-    this.loaded = true;
+  isExternal(settingName: string): boolean {
+    return this.externalPaths.has(settingName);
   }
 
   /**
-   * Sync vault notes into the RAG index
+   * Sync vault notes into the RAG index for a named setting
    */
   async sync(
     app: App,
-    ragConfig: RagConfig,
+    settingName: string,
+    ragSetting: RagSetting,
     llmConfig: LocalLlmConfig,
-    workspaceFolder: string,
   ): Promise<SyncResult> {
     // Get markdown files matching target/exclude criteria
-    const files = getTargetFiles(app, ragConfig, workspaceFolder);
+    const files = getTargetFiles(app, ragSetting);
 
     // Compute checksums for all files
     const newChecksums: Record<string, string> = {};
-    const fileContents: Map<string, string> = new Map();
+    const fileContents = new Map<string, string>();
 
     for (const file of files) {
       const content = await app.vault.cachedRead(file);
@@ -86,10 +118,20 @@ class RagStore {
       fileContents.set(file.path, content);
     }
 
-    // Force fresh load (ignore loaded flag — clear() or version change may have invalidated it)
-    this.loaded = false;
-    await this.load(app, workspaceFolder);
-    const oldChecksums = this.index?.fileChecksums || {};
+    // Force fresh load
+    this.entries.delete(settingName);
+    const entry = await this.ensureLoaded(app, settingName, {
+      externalIndexPath: ragSetting.externalIndexPath,
+    });
+    let { index, vectors } = entry;
+    const incompatible = entry.incompatibleIndexLoaded;
+
+    if (incompatible) {
+      index = null;
+      vectors = null;
+    }
+
+    const oldChecksums = index?.fileChecksums || {};
 
     // Find files that changed
     const changedFiles: string[] = [];
@@ -99,13 +141,13 @@ class RagStore {
     };
 
     // Keep chunks from unchanged files
-    if (this.index && this.vectors) {
-      for (let i = 0; i < this.index.meta.length; i++) {
-        const chunk = this.index.meta[i];
+    if (index && vectors) {
+      for (let i = 0; i < index.meta.length; i++) {
+        const chunk = index.meta[i];
         if (newChecksums[chunk.filePath] === oldChecksums[chunk.filePath]) {
           unchangedChunks.meta.push(chunk);
-          const dim = this.index.dimension;
-          const vec = Array.from(this.vectors.slice(i * dim, (i + 1) * dim));
+          const dim = index.dimension;
+          const vec = Array.from(vectors.slice(i * dim, (i + 1) * dim));
           unchangedChunks.vectors.push(vec);
         }
       }
@@ -130,7 +172,7 @@ class RagStore {
         const content = fileContents.get(filePath);
         if (!content) continue;
 
-        const chunks = chunkText(content, ragConfig.chunkSize, ragConfig.chunkOverlap);
+        const chunks = chunkText(content, ragSetting.chunkSize, ragSetting.chunkOverlap);
         for (const chunk of chunks) {
           const heading = findNearestHeading(content, chunk.startOffset);
           const prefix = heading ? `[${filePath} > ${heading}]\n` : `[${filePath}]\n`;
@@ -144,11 +186,11 @@ class RagStore {
         }
       }
 
-      // Batch embed (max 32 at a time to avoid server issues)
+      // Batch embed (max 32 at a time)
       const BATCH_SIZE = 32;
       for (let i = 0; i < allTexts.length; i += BATCH_SIZE) {
         const batch = allTexts.slice(i, i + BATCH_SIZE);
-        const embeddings = await generateEmbeddings(batch, ragConfig, llmConfig);
+        const embeddings = await generateEmbeddings(batch, ragSetting, llmConfig);
         newEmbeddings.push(...embeddings);
       }
 
@@ -163,21 +205,27 @@ class RagStore {
     const dimension = allVectorArrays.length > 0 ? allVectorArrays[0].length : 0;
 
     // Build flat Float32Array
-    const vectors = new Float32Array(allMeta.length * dimension);
+    const newVectors = new Float32Array(allMeta.length * dimension);
     for (let i = 0; i < allVectorArrays.length; i++) {
-      vectors.set(allVectorArrays[i], i * dimension);
+      newVectors.set(allVectorArrays[i], i * dimension);
     }
 
     // Save
-    this.index = {
+    const newIndex: RagIndex = {
       meta: allMeta,
       dimension,
       fileChecksums: newChecksums,
       embeddingFormatVersion: EMBEDDING_FORMAT_VERSION,
     };
-    this.vectors = vectors;
 
-    await saveRagIndex(app, workspaceFolder, this.index, this.vectors);
+    this.entries.set(settingName, {
+      index: newIndex,
+      vectors: newVectors,
+      loaded: true,
+      incompatibleIndexLoaded: false,
+    });
+
+    await saveRagIndex(app, settingName, newIndex, newVectors);
 
     return {
       totalChunks: allMeta.length,
@@ -187,47 +235,45 @@ class RagStore {
 
   /**
    * Sync a single file into the RAG index.
-   * If oldPath is provided, removes chunks for that path first (useful for renames).
    */
   async syncFile(
     app: App,
-    ragConfig: RagConfig,
+    settingName: string,
+    ragSetting: RagSetting,
     llmConfig: LocalLlmConfig,
-    workspaceFolder: string,
     filePath: string,
     oldPath?: string,
   ): Promise<{ path: string; syncedAt: string }> {
-    await this.load(app, workspaceFolder);
+    const entry = await this.ensureLoaded(app, settingName, {
+      externalIndexPath: ragSetting.externalIndexPath,
+    });
 
-    if (this.incompatibleIndexLoaded) {
-      await this.sync(app, ragConfig, llmConfig, workspaceFolder);
-      this.incompatibleIndexLoaded = false;
-      return {
-        path: filePath,
-        syncedAt: new Date().toISOString(),
-      };
+    if (entry.incompatibleIndexLoaded) {
+      await this.sync(app, settingName, ragSetting, llmConfig);
+      return { path: filePath, syncedAt: new Date().toISOString() };
     }
 
-    const dimension = this.index?.dimension || 0;
+    const { index, vectors } = entry;
+    const dimension = index?.dimension || 0;
 
-    // Collect existing chunks, removing old entries for this file (and oldPath if rename)
+    // Collect existing chunks, removing old entries for this file
     const keptMeta: ChunkMeta[] = [];
     const keptVectors: number[][] = [];
     const pathsToRemove = new Set<string>([filePath]);
     if (oldPath) pathsToRemove.add(oldPath);
 
-    if (this.index && this.vectors) {
-      const dim = this.index.dimension;
-      for (let i = 0; i < this.index.meta.length; i++) {
-        if (!pathsToRemove.has(this.index.meta[i].filePath)) {
-          keptMeta.push(this.index.meta[i]);
-          keptVectors.push(Array.from(this.vectors.slice(i * dim, (i + 1) * dim)));
+    if (index && vectors) {
+      const dim = index.dimension;
+      for (let i = 0; i < index.meta.length; i++) {
+        if (!pathsToRemove.has(index.meta[i].filePath)) {
+          keptMeta.push(index.meta[i]);
+          keptVectors.push(Array.from(vectors.slice(i * dim, (i + 1) * dim)));
         }
       }
     }
 
     // Update checksums
-    const checksums = { ...(this.index?.fileChecksums || {}) };
+    const checksums = { ...(index?.fileChecksums || {}) };
     if (oldPath) delete checksums[oldPath];
 
     // Read and embed the file
@@ -236,14 +282,13 @@ class RagStore {
       const content = await app.vault.cachedRead(file);
       const checksum = simpleChecksum(content);
 
-      // Skip re-embedding if content hasn't changed (and not a rename)
       if (!oldPath && checksum === checksums[filePath]) {
         return { path: filePath, syncedAt: new Date().toISOString() };
       }
 
       checksums[filePath] = checksum;
 
-      const chunks = chunkText(content, ragConfig.chunkSize, ragConfig.chunkOverlap);
+      const chunks = chunkText(content, ragSetting.chunkSize, ragSetting.chunkOverlap);
       if (chunks.length > 0) {
         const texts = chunks.map(c => {
           const heading = findNearestHeading(content, c.startOffset);
@@ -254,7 +299,7 @@ class RagStore {
         const newEmbeddings: number[][] = [];
         for (let i = 0; i < texts.length; i += BATCH_SIZE) {
           const batch = texts.slice(i, i + BATCH_SIZE);
-          const embeddings = await generateEmbeddings(batch, ragConfig, llmConfig);
+          const embeddings = await generateEmbeddings(batch, ragSetting, llmConfig);
           newEmbeddings.push(...embeddings);
         }
 
@@ -268,84 +313,132 @@ class RagStore {
         }
       }
     } else {
-      // File doesn't exist or isn't markdown — just remove it from index
       delete checksums[filePath];
     }
 
     // Rebuild index
     const newDimension = keptVectors.length > 0 ? keptVectors[0].length : dimension;
-    const vectors = new Float32Array(keptMeta.length * newDimension);
+    const newVectors = new Float32Array(keptMeta.length * newDimension);
     for (let i = 0; i < keptVectors.length; i++) {
-      vectors.set(keptVectors[i], i * newDimension);
+      newVectors.set(keptVectors[i], i * newDimension);
     }
 
-    this.index = {
+    const newIndex: RagIndex = {
       meta: keptMeta,
       dimension: newDimension,
       fileChecksums: checksums,
       embeddingFormatVersion: EMBEDDING_FORMAT_VERSION,
     };
-    this.vectors = vectors;
 
-    await saveRagIndex(app, workspaceFolder, this.index, this.vectors);
+    this.entries.set(settingName, {
+      index: newIndex,
+      vectors: newVectors,
+      loaded: true,
+      incompatibleIndexLoaded: false,
+    });
 
-    return {
-      path: filePath,
-      syncedAt: new Date().toISOString(),
-    };
+    await saveRagIndex(app, settingName, newIndex, newVectors);
+
+    return { path: filePath, syncedAt: new Date().toISOString() };
   }
 
   /**
-   * Search for similar chunks
+   * Search for similar chunks in a named setting's index
    */
   async search(
+    settingName: string,
     query: string,
-    ragConfig: RagConfig,
+    ragSetting: RagSetting,
     llmConfig: LocalLlmConfig,
     app: App,
-    workspaceFolder: string,
   ): Promise<RagSearchResult[]> {
-    await this.load(app, workspaceFolder);
+    const entry = await this.ensureLoaded(app, settingName, {
+      externalIndexPath: ragSetting.externalIndexPath,
+    });
 
-    if (!this.index || !this.vectors || this.index.meta.length === 0) {
+    if (!entry.index || !entry.vectors || entry.index.meta.length === 0) {
       return [];
     }
 
-    const queryEmbedding = await generateEmbedding(query, ragConfig, llmConfig);
+    const { index, vectors } = entry;
+    const queryEmbedding = await generateEmbedding(query, ragSetting, llmConfig);
     const queryVec = new Float32Array(queryEmbedding);
-    const dim = this.index.dimension;
+    const dim = index.dimension;
 
     // Compute cosine similarities
     const scores: { index: number; score: number }[] = [];
-    for (let i = 0; i < this.index.meta.length; i++) {
-      const chunkVec = this.vectors.slice(i * dim, (i + 1) * dim);
+    for (let i = 0; i < index.meta.length; i++) {
+      const start = i * dim;
+      const end = start + dim;
+      if (end > vectors.length) break;
+      const chunkVec = vectors.subarray(start, end);
       const score = cosineSimilarity(queryVec, chunkVec);
       scores.push({ index: i, score });
     }
 
-    // Sort by score descending, filter by minimum score, take top K
     scores.sort((a, b) => b.score - a.score);
-    const minScore = ragConfig.minScore ?? 0;
+    const minScore = ragSetting.minScore ?? 0;
     const topK = scores
       .filter(s => s.score >= minScore)
-      .slice(0, ragConfig.topK);
+      .slice(0, ragSetting.topK);
 
-    return topK.map(({ index, score }) => ({
-      text: this.index!.meta[index].text,
-      filePath: this.index!.meta[index].filePath,
+    return topK.map(({ index: idx, score }) => ({
+      text: index.meta[idx].text,
+      filePath: index.meta[idx].filePath,
       score,
     }));
   }
 
   /**
-   * Clear the entire RAG index
+   * Clear the entire RAG index for a named setting
    */
-  async clear(app: App, workspaceFolder: string): Promise<void> {
-    this.index = null;
-    this.vectors = null;
-    this.loaded = false;
-    this.incompatibleIndexLoaded = false;
-    await deleteRagIndex(app, workspaceFolder);
+  async clear(app: App, settingName: string): Promise<void> {
+    this.entries.delete(settingName);
+    await deleteRagIndex(app, settingName);
+  }
+
+  private async ensureLoaded(
+    app: App,
+    settingName: string,
+    options?: LoadOptions,
+  ): Promise<StoreEntry> {
+    if (options?.externalIndexPath !== undefined) {
+      if (options.externalIndexPath) {
+        this.externalPaths.set(settingName, options.externalIndexPath);
+      } else {
+        this.externalPaths.delete(settingName);
+      }
+    }
+    const existing = this.entries.get(settingName);
+    if (existing?.loaded) {
+      return existing;
+    }
+
+    const externalPath = this.externalPaths.get(settingName);
+    let index: RagIndex | null = null;
+    let vectors: Float32Array | null = null;
+    let incompatibleIndexLoaded = false;
+
+    if (externalPath) {
+      index = await loadExternalRagIndex(externalPath);
+      if (index && index.meta.length > 0) {
+        vectors = await loadExternalRagVectors(externalPath);
+      }
+    } else {
+      index = await loadRagIndex(app, settingName);
+      if (index) {
+        if (index.embeddingFormatVersion === EMBEDDING_FORMAT_VERSION) {
+          vectors = await loadRagVectors(app, settingName);
+        } else {
+          index = null;
+          incompatibleIndexLoaded = true;
+        }
+      }
+    }
+
+    const entry: StoreEntry = { index, vectors, loaded: true, incompatibleIndexLoaded };
+    this.entries.set(settingName, entry);
+    return entry;
   }
 }
 
@@ -361,9 +454,9 @@ export function getRagStore(): RagStore {
 
 // --- Utility functions ---
 
-function getTargetFiles(app: App, ragConfig: RagConfig, workspaceFolder: string): TFile[] {
+function getTargetFiles(app: App, ragSetting: RagSetting): TFile[] {
   const files = app.vault.getMarkdownFiles();
-  const excludeRegexes = ragConfig.excludePatterns
+  const excludeRegexes = ragSetting.excludePatterns
     .filter(Boolean)
     .flatMap(p => {
       try { return [new RegExp(p)]; } catch { return []; }
@@ -371,11 +464,11 @@ function getTargetFiles(app: App, ragConfig: RagConfig, workspaceFolder: string)
 
   return files.filter(file => {
     // Skip workspace folder
-    if (file.path.startsWith(workspaceFolder + "/")) return false;
+    if (file.path.startsWith(WORKSPACE_FOLDER + "/")) return false;
 
     // Check target folders
-    if (ragConfig.targetFolders.length > 0) {
-      const inTarget = ragConfig.targetFolders.some(folder =>
+    if (ragSetting.targetFolders.length > 0) {
+      const inTarget = ragSetting.targetFolders.some(folder =>
         file.path.startsWith(folder + "/") || file.path === folder
       );
       if (!inTarget) return false;
@@ -422,9 +515,9 @@ export function chunkText(
       }
     }
 
-    const chunkText = text.slice(start, end).trim();
-    if (chunkText) {
-      chunks.push({ text: chunkText, startOffset: start });
+    const chunkStr = text.slice(start, end).trim();
+    if (chunkStr) {
+      chunks.push({ text: chunkStr, startOffset: start });
     }
 
     start = end - chunkOverlap;
@@ -441,14 +534,13 @@ export function simpleChecksum(content: string): string {
   for (let i = 0; i < content.length; i++) {
     const char = content.charCodeAt(i);
     hash = ((hash << 5) - hash) + char;
-    hash |= 0; // Convert to 32-bit integer
+    hash |= 0;
   }
   return hash.toString(36);
 }
 
 /**
  * Find the nearest Markdown heading before a given offset.
- * Returns the heading text (without the # prefix) or empty string if none.
  */
 export function findNearestHeading(text: string, offset: number): string {
   const headingPattern = /^(#{1,6})\s+(.+)$/gm;

@@ -2,7 +2,8 @@ import { Plugin, WorkspaceLeaf, MarkdownView, Notice, Modal, TFile, type Editor 
 import { ChatView, VIEW_TYPE_LLM_CHAT } from "src/ui/ChatView";
 import { CryptView, CRYPT_VIEW_TYPE } from "src/ui/CryptView";
 import { SettingsTab } from "src/ui/SettingsTab";
-import { type LocalLlmHubSettings, DEFAULT_SETTINGS } from "src/types";
+import { type LocalLlmHubSettings, type RagSetting, DEFAULT_SETTINGS } from "src/types";
+import { WorkspaceStateManager } from "src/core/workspaceStateManager";
 import { initLocale, t } from "src/i18n";
 import { formatError } from "src/utils/error";
 import { EncryptionManager } from "src/plugin/encryptionManager";
@@ -44,6 +45,7 @@ export class SettingsEmitter {
 export class LocalLlmHubPlugin extends Plugin {
   settings: LocalLlmHubSettings = { ...DEFAULT_SETTINGS };
   settingsEmitter = new SettingsEmitter();
+  wsManager!: WorkspaceStateManager;
   encryptionManager!: EncryptionManager;
   workflowManager!: WorkflowManager;
   mcpManager = new McpManager();
@@ -381,6 +383,57 @@ export class LocalLlmHubPlugin extends Plugin {
     if (!this.settings.mcpServers) {
       this.settings.mcpServers = [];
     }
+
+    // Initialize workspace state manager
+    this.wsManager = new WorkspaceStateManager(this.app, this.settingsEmitter);
+    await this.wsManager.loadOrCreateWorkspaceState();
+
+    // Migrate old ragConfig to named RAG setting
+    if (this.settings.ragConfig) {
+      const migrated = await this.wsManager.migrateFromRagConfig(this.settings.ragConfig);
+      if (migrated) {
+        delete this.settings.ragConfig;
+        await this.saveSettings();
+      }
+    }
+  }
+
+  // --- RAG setting delegates ---
+
+  getRagSettingNames(): string[] {
+    return this.wsManager.getRagSettingNames();
+  }
+
+  getRagSetting(name: string): RagSetting | null {
+    return this.wsManager.getRagSetting(name);
+  }
+
+  getSelectedRagSettingName(): string | null {
+    return this.wsManager.workspaceState.selectedRagSetting;
+  }
+
+  getSelectedRagSetting(): RagSetting | null {
+    return this.wsManager.getSelectedRagSetting();
+  }
+
+  async selectRagSetting(name: string | null): Promise<void> {
+    await this.wsManager.selectRagSetting(name);
+  }
+
+  async createRagSetting(name: string, setting?: Partial<RagSetting>): Promise<void> {
+    await this.wsManager.createRagSetting(name, setting);
+  }
+
+  async updateRagSetting(name: string, updates: Partial<RagSetting>): Promise<void> {
+    await this.wsManager.updateRagSetting(name, updates);
+  }
+
+  async deleteRagSetting(name: string): Promise<void> {
+    await this.wsManager.deleteRagSetting(name);
+  }
+
+  async renameRagSetting(oldName: string, newName: string): Promise<void> {
+    await this.wsManager.renameRagSetting(oldName, newName);
   }
 
   async saveSettings(): Promise<void> {

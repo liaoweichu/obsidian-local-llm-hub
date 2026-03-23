@@ -1,9 +1,12 @@
-import { Setting, Notice } from "obsidian";
+import { Setting, Notice, Modal } from "obsidian";
 import { t } from "src/i18n";
 import type { LocalLlmHubPlugin } from "src/plugin";
+import type { RagSetting } from "src/types";
+import { DEFAULT_RAG_SETTING } from "src/types";
 import { getRagStore } from "src/core/ragStore";
-import { WORKSPACE_FOLDER } from "src/types";
+import { deleteRagIndex } from "src/core/ragStorage";
 import { fetchEmbeddingModels } from "src/core/localLlmProvider";
+import { RagSettingNameModal } from "./RagSettingNameModal";
 
 interface SettingsContext {
   plugin: LocalLlmHubPlugin;
@@ -12,30 +15,162 @@ interface SettingsContext {
 
 export function displayRagSettings(containerEl: HTMLElement, ctx: SettingsContext): void {
   const { plugin, display } = ctx;
-  const ragConfig = plugin.settings.ragConfig;
-  const updateRagConfig = async (patch: Partial<typeof plugin.settings.ragConfig>) => {
-    plugin.settings.ragConfig = { ...plugin.settings.ragConfig, ...patch };
-    await plugin.saveSettings();
-  };
 
   new Setting(containerEl).setName(t("settings.rag")).setHeading();
 
-  // Enable RAG
+  // --- Setting selector dropdown + create button ---
+  const settingNames = plugin.getRagSettingNames();
+  const selectedName = plugin.getSelectedRagSettingName();
+
+  const selectorSetting = new Setting(containerEl)
+    .setName(t("settings.ragSetting"))
+    .setDesc(t("settings.ragSettingDesc"));
+
+  selectorSetting.controlEl.createEl("select", {}, (select) => {
+    select.addClass("dropdown");
+
+    // "None" option
+    const noneOpt = select.createEl("option", { text: t("settings.ragNone"), value: "" });
+    if (!selectedName) noneOpt.selected = true;
+
+    for (const name of settingNames) {
+      const opt = select.createEl("option", { text: name, value: name });
+      if (name === selectedName) opt.selected = true;
+    }
+
+    select.addEventListener("change", () => {
+      void (async () => {
+        await plugin.selectRagSetting(select.value || null);
+        display();
+      })();
+    });
+  });
+
+  // Create button
+  selectorSetting.addExtraButton((btn) =>
+    btn
+      .setIcon("plus")
+      .setTooltip(t("settings.createRagSetting"))
+      .onClick(() => {
+        new RagSettingNameModal(
+          plugin.app,
+          t("settings.createRagSetting"),
+          "",
+          async (name) => {
+            try {
+              await plugin.createRagSetting(name);
+              await plugin.selectRagSetting(name);
+              new Notice(t("settings.ragSettingCreated", { name }));
+              display();
+            } catch (err) {
+              new Notice(err instanceof Error ? err.message : String(err));
+            }
+          }
+        ).open();
+      })
+  );
+
+  // --- Selected setting detail ---
+  if (!selectedName) return;
+
+  const ragSetting = plugin.getRagSetting(selectedName);
+  if (!ragSetting) return;
+
+  displaySelectedRagSetting(containerEl, ctx, selectedName, ragSetting);
+}
+
+function displaySelectedRagSetting(
+  containerEl: HTMLElement,
+  ctx: SettingsContext,
+  name: string,
+  ragSetting: RagSetting,
+): void {
+  const { plugin, display } = ctx;
+  const isExternal = !!ragSetting.externalIndexPath;
+
+  const updateSetting = async (updates: Partial<RagSetting>) => {
+    await plugin.updateRagSetting(name, updates);
+  };
+
+  // Header with rename + delete
+  const headerSetting = new Setting(containerEl)
+    .setName(t("settings.settingsFor", { name }))
+    .setHeading();
+
+  headerSetting.addExtraButton((btn) =>
+    btn
+      .setIcon("pencil")
+      .setTooltip(t("settings.renameSetting"))
+      .onClick(() => {
+        new RagSettingNameModal(
+          plugin.app,
+          t("settings.renameSetting"),
+          name,
+          async (newName) => {
+            try {
+              await plugin.renameRagSetting(name, newName);
+              new Notice(t("settings.renamedTo", { name: newName }));
+              display();
+            } catch (err) {
+              new Notice(err instanceof Error ? err.message : String(err));
+            }
+          }
+        ).open();
+      })
+  );
+
+  headerSetting.addExtraButton((btn) =>
+    btn
+      .setIcon("trash")
+      .setTooltip(t("settings.deleteSetting"))
+      .onClick(() => {
+        const modal = new Modal(plugin.app);
+        modal.titleEl.setText(t("settings.deleteSetting"));
+        modal.contentEl.createEl("p", { text: t("settings.deleteSettingConfirm", { name }) });
+        new Setting(modal.contentEl)
+          .addButton((cancelBtn) =>
+            cancelBtn.setButtonText("Cancel").onClick(() => modal.close())
+          )
+          .addButton((confirmBtn) =>
+            confirmBtn
+              .setButtonText("Delete")
+              .setWarning()
+              .onClick(async () => {
+                modal.close();
+                await deleteRagIndex(plugin.app, name);
+                await plugin.deleteRagSetting(name);
+                new Notice(t("settings.ragSettingDeleted", { name }));
+                display();
+              })
+          );
+        modal.open();
+      })
+  );
+
+  // External index path (save on blur to avoid writing every keystroke)
   new Setting(containerEl)
-    .setName(t("settings.ragEnable"))
-    .setDesc(t("settings.ragEnableDesc"))
-    .addToggle((toggle) => {
-      toggle
-        .setValue(ragConfig.enabled)
-        .onChange(async (value) => {
-          await updateRagConfig({ enabled: value });
+    .setName(t("settings.ragExternalIndexPath"))
+    .setDesc(t("settings.ragExternalIndexPathDesc"))
+    .addText((text) => {
+      text
+        .setPlaceholder(t("settings.ragExternalIndexPathPlaceholder"))
+        .setValue(ragSetting.externalIndexPath || "");
+      text.inputEl.addClass("llm-hub-wide-input");
+      text.inputEl.addEventListener("blur", () => {
+        const trimmed = text.inputEl.value.trim();
+        if (trimmed !== (ragSetting.externalIndexPath || "")) {
+          void updateSetting({ externalIndexPath: trimmed }).then(() => {
+            getRagStore().setExternalPath(name, trimmed);
+          }).catch((err) => new Notice(String(err)));
+        }
+        const newIsExternal = !!trimmed;
+        if (newIsExternal !== isExternal) {
           display();
-        });
+        }
+      });
     });
 
-  if (!ragConfig.enabled) return;
-
-  // Embedding server URL (optional override)
+  // Embedding server URL
   new Setting(containerEl)
     .setName(t("settings.ragEmbeddingBaseUrl"))
     .setDesc(t("settings.ragEmbeddingBaseUrlDesc"))
@@ -43,9 +178,9 @@ export function displayRagSettings(containerEl: HTMLElement, ctx: SettingsContex
       text
         // eslint-disable-next-line obsidianmd/ui/sentence-case
         .setPlaceholder("http://localhost:8001")
-        .setValue(ragConfig.embeddingBaseUrl || "")
-        .onChange(async (value) => {
-          await updateRagConfig({ embeddingBaseUrl: value || undefined });
+        .setValue(ragSetting.embeddingBaseUrl || "")
+        .onChange((value) => {
+          void updateSetting({ embeddingBaseUrl: value.trim() }).catch((err) => new Notice(String(err)));
         });
       text.inputEl.addClass("llm-hub-wide-input");
     });
@@ -59,16 +194,16 @@ export function displayRagSettings(containerEl: HTMLElement, ctx: SettingsContex
   embeddingModelSetting.controlEl.createEl("select", {}, (select) => {
     embeddingDropdown = select;
     select.addClass("dropdown");
-    if (!ragConfig.embeddingModel) {
+    if (!ragSetting.embeddingModel) {
       const placeholder = select.createEl("option", { text: t("settings.ragEmbeddingModelPlaceholder"), value: "" });
       placeholder.disabled = true;
       placeholder.selected = true;
     } else {
-      const opt = select.createEl("option", { text: ragConfig.embeddingModel, value: ragConfig.embeddingModel });
+      const opt = select.createEl("option", { text: ragSetting.embeddingModel, value: ragSetting.embeddingModel });
       opt.selected = true;
     }
     select.addEventListener("change", () => {
-      void updateRagConfig({ embeddingModel: select.value });
+      void updateSetting({ embeddingModel: select.value }).catch((err) => new Notice(String(err)));
     });
   });
 
@@ -79,7 +214,7 @@ export function displayRagSettings(containerEl: HTMLElement, ctx: SettingsContex
         btn.setButtonText(t("settings.llmModal.fetching"));
         btn.setDisabled(true);
         try {
-          const models = await fetchEmbeddingModels(plugin.settings.llmConfig, plugin.settings.ragConfig.embeddingBaseUrl);
+          const models = await fetchEmbeddingModels(plugin.settings.llmConfig, ragSetting.embeddingBaseUrl || undefined);
           if (models.length === 0) {
             new Notice(t("settings.llmModal.noModelsFound"));
             return;
@@ -88,12 +223,12 @@ export function displayRagSettings(containerEl: HTMLElement, ctx: SettingsContex
             embeddingDropdown.empty();
             for (const model of models) {
               const opt = embeddingDropdown.createEl("option", { text: model, value: model });
-              if (model === ragConfig.embeddingModel) {
+              if (model === ragSetting.embeddingModel) {
                 opt.selected = true;
               }
             }
-            if (!ragConfig.embeddingModel || !models.includes(ragConfig.embeddingModel)) {
-              await updateRagConfig({ embeddingModel: models[0] });
+            if (!ragSetting.embeddingModel || !models.includes(ragSetting.embeddingModel)) {
+              await updateSetting({ embeddingModel: models[0] });
               embeddingDropdown.value = models[0];
             }
           }
@@ -107,51 +242,71 @@ export function displayRagSettings(containerEl: HTMLElement, ctx: SettingsContex
       })
   );
 
-  // Target folders
-  new Setting(containerEl)
-    .setName(t("settings.ragTargetFolders"))
-    .setDesc(t("settings.ragTargetFoldersDesc"))
-    .addText((text) => {
-      text
-        .setValue(ragConfig.targetFolders.join(", "))
-        .onChange(async (value) => {
-          const folders = value.split(",").map(s => s.trim()).filter(Boolean);
-          await updateRagConfig({ targetFolders: folders });
-        });
-      text.inputEl.addClass("llm-hub-wide-input");
-    });
+  if (!isExternal) {
+    // Target folders (vault sync only)
+    new Setting(containerEl)
+      .setName(t("settings.ragTargetFolders"))
+      .setDesc(t("settings.ragTargetFoldersDesc"))
+      .addText((text) => {
+        text
+          .setValue(ragSetting.targetFolders.join(", "))
+          .onChange((value) => {
+            const folders = value.split(",").map(s => s.trim()).filter(Boolean);
+            void updateSetting({ targetFolders: folders }).catch((err) => new Notice(String(err)));
+          });
+        text.inputEl.addClass("llm-hub-wide-input");
+      });
 
-  // Exclude patterns
-  new Setting(containerEl)
-    .setName(t("settings.ragExcludePatterns"))
-    .setDesc(t("settings.ragExcludePatternsDesc"))
-    .addText((text) => {
-      text
-        .setValue(ragConfig.excludePatterns.join(", "))
-        .onChange(async (value) => {
-          const patterns = value.split(",").map(s => s.trim()).filter(Boolean);
-          await updateRagConfig({ excludePatterns: patterns });
-        });
-      text.inputEl.addClass("llm-hub-wide-input");
-    });
+    // Exclude patterns (vault sync only)
+    new Setting(containerEl)
+      .setName(t("settings.ragExcludePatterns"))
+      .setDesc(t("settings.ragExcludePatternsDesc"))
+      .addText((text) => {
+        text
+          .setValue(ragSetting.excludePatterns.join(", "))
+          .onChange((value) => {
+            const patterns = value.split(",").map(s => s.trim()).filter(Boolean);
+            void updateSetting({ excludePatterns: patterns }).catch((err) => new Notice(String(err)));
+          });
+        text.inputEl.addClass("llm-hub-wide-input");
+      });
 
-  // Chunk size
-  new Setting(containerEl)
-    .setName(t("settings.ragChunkSize"))
-    .setDesc(t("settings.ragChunkSizeDesc"))
-    .addText((text) => {
-      text
-        .setValue(String(ragConfig.chunkSize))
-        .onChange(async (value) => {
-          const num = parseInt(value, 10);
-          if (!isNaN(num) && num > 0) {
-            await updateRagConfig({ chunkSize: num });
-          }
-        });
-      text.inputEl.type = "number";
-      text.inputEl.min = "100";
-      text.inputEl.step = "100";
-    });
+    // Chunk size (vault sync only)
+    new Setting(containerEl)
+      .setName(t("settings.ragChunkSize"))
+      .setDesc(t("settings.ragChunkSizeDesc"))
+      .addText((text) => {
+        text
+          .setValue(String(ragSetting.chunkSize))
+          .onChange((value) => {
+            const num = parseInt(value, 10);
+            if (!isNaN(num) && num > 0) {
+              void updateSetting({ chunkSize: num }).catch((err) => new Notice(String(err)));
+            }
+          });
+        text.inputEl.type = "number";
+        text.inputEl.min = "100";
+        text.inputEl.step = "100";
+      });
+
+    // Chunk overlap (vault sync only)
+    new Setting(containerEl)
+      .setName(t("settings.ragChunkOverlap"))
+      .setDesc(t("settings.ragChunkOverlapDesc"))
+      .addText((text) => {
+        text
+          .setValue(String(ragSetting.chunkOverlap))
+          .onChange((value) => {
+            const num = parseInt(value, 10);
+            if (!isNaN(num) && num >= 0) {
+              void updateSetting({ chunkOverlap: num }).catch((err) => new Notice(String(err)));
+            }
+          });
+        text.inputEl.type = "number";
+        text.inputEl.min = "0";
+        text.inputEl.step = "50";
+      });
+  }
 
   // Top K
   new Setting(containerEl)
@@ -159,11 +314,11 @@ export function displayRagSettings(containerEl: HTMLElement, ctx: SettingsContex
     .setDesc(t("settings.ragTopKDesc"))
     .addText((text) => {
       text
-        .setValue(String(ragConfig.topK))
-        .onChange(async (value) => {
+        .setValue(String(ragSetting.topK))
+        .onChange((value) => {
           const num = parseInt(value, 10);
           if (!isNaN(num) && num > 0) {
-            await updateRagConfig({ topK: num });
+            void updateSetting({ topK: num }).catch((err) => new Notice(String(err)));
           }
         });
       text.inputEl.type = "number";
@@ -172,88 +327,99 @@ export function displayRagSettings(containerEl: HTMLElement, ctx: SettingsContex
       text.inputEl.step = "1";
     });
 
-  // Min score
+  // Min score (slider)
+  const currentMinScore = ragSetting.minScore ?? DEFAULT_RAG_SETTING.minScore;
   new Setting(containerEl)
     .setName(t("settings.ragMinScore"))
     .setDesc(t("settings.ragMinScoreDesc"))
-    .addText((text) => {
-      text
-        .setValue(String(ragConfig.minScore ?? 0.3))
-        .onChange(async (value) => {
-          const num = parseFloat(value);
-          if (!isNaN(num) && num >= 0 && num <= 1) {
-            await updateRagConfig({ minScore: num });
-          }
+    .addSlider((slider) => {
+      slider
+        .setLimits(0, 10, 1)
+        .setValue(Math.round(currentMinScore * 10))
+        .setDynamicTooltip()
+        .onChange((value) => {
+          void updateSetting({ minScore: value / 10 }).catch((err) => new Notice(String(err)));
         });
-      text.inputEl.type = "number";
-      text.inputEl.min = "0";
-      text.inputEl.max = "1";
-      text.inputEl.step = "0.05";
-    });
+      const tooltipEl = slider.sliderEl.nextElementSibling;
+      if (tooltipEl) {
+        const updateTooltip = () => { tooltipEl.textContent = (slider.getValue() / 10).toFixed(1); };
+        updateTooltip();
+        slider.sliderEl.addEventListener("input", updateTooltip);
+      }
+    })
+    .addExtraButton((button) =>
+      button
+        .setIcon("reset")
+        .setTooltip("Reset to default (0.3)")
+        .onClick(() => {
+          void (async () => {
+            await updateSetting({ minScore: DEFAULT_RAG_SETTING.minScore });
+            display();
+          })();
+        })
+    );
 
-  // Status display — load from disk if not yet loaded, then update
+  // Status display
   const store = getRagStore();
+  store.setExternalPath(name, ragSetting.externalIndexPath);
   const statusSetting = new Setting(containerEl);
 
   const updateStatusDesc = () => {
-    const status = store.getStatus();
+    const status = store.getStatus(name);
     if (status.totalChunks > 0) {
-      statusSetting.setDesc(
-        t("settings.ragStatus", {
-          chunks: String(status.totalChunks),
-          files: String(status.indexedFiles),
-        })
-      );
+      const desc = isExternal
+        ? `${t("settings.ragExternalActive")} — ${t("settings.ragStatus", { chunks: String(status.totalChunks), files: String(status.indexedFiles) })}`
+        : t("settings.ragStatus", { chunks: String(status.totalChunks), files: String(status.indexedFiles) });
+      statusSetting.setDesc(desc);
     } else {
-      statusSetting.setDesc(t("settings.ragNoIndex"));
+      statusSetting.setDesc(isExternal ? t("settings.ragExternalActive") : t("settings.ragNoIndex"));
     }
   };
 
-  // Show immediate status (may be empty if not loaded yet)
   updateStatusDesc();
+  void store.load(plugin.app, [name], { [name]: ragSetting }).then(updateStatusDesc);
 
-  // Load from disk and refresh status
-  void store.load(plugin.app, WORKSPACE_FOLDER).then(updateStatusDesc);
+  if (!isExternal) {
+    // Sync button (vault sync only)
+    statusSetting.addButton((btn) =>
+      btn
+        .setButtonText(t("settings.ragSync"))
+        .setCta()
+        .onClick(async () => {
+          btn.setButtonText(t("settings.ragSyncing"));
+          btn.setDisabled(true);
+          try {
+            const result = await store.sync(
+              plugin.app,
+              name,
+              ragSetting,
+              plugin.settings.llmConfig,
+            );
+            new Notice(t("settings.ragSynced", {
+              count: String(result.totalChunks),
+              files: String(result.indexedFiles),
+            }));
+            display();
+          } catch (err) {
+            new Notice(t("settings.ragSyncFailed", {
+              error: err instanceof Error ? err.message : String(err),
+            }));
+          } finally {
+            btn.setButtonText(t("settings.ragSync"));
+            btn.setDisabled(false);
+          }
+        })
+    );
 
-  // Sync button
-  statusSetting.addButton((btn) =>
-    btn
-      .setButtonText(t("settings.ragSync"))
-      .setCta()
-      .onClick(async () => {
-        btn.setButtonText(t("settings.ragSyncing"));
-        btn.setDisabled(true);
-        try {
-          const result = await store.sync(
-            plugin.app,
-            plugin.settings.ragConfig,
-            plugin.settings.llmConfig,
-            WORKSPACE_FOLDER,
-          );
-          new Notice(t("settings.ragSynced", {
-            count: String(result.totalChunks),
-            files: String(result.indexedFiles),
-          }));
+    // Clear button (vault sync only)
+    statusSetting.addButton((btn) =>
+      btn
+        .setButtonText(t("settings.ragClear"))
+        .onClick(async () => {
+          await store.clear(plugin.app, name);
+          new Notice(t("settings.ragCleared"));
           display();
-        } catch (err) {
-          new Notice(t("settings.ragSyncFailed", {
-            error: err instanceof Error ? err.message : String(err),
-          }));
-        } finally {
-          btn.setButtonText(t("settings.ragSync"));
-          btn.setDisabled(false);
-        }
-      })
-  );
-
-  // Clear button
-  statusSetting.addButton((btn) =>
-    btn
-      .setButtonText(t("settings.ragClear"))
-      .onClick(async () => {
-        await store.clear(plugin.app, WORKSPACE_FOLDER);
-        new Notice(t("settings.ragCleared"));
-        display();
-      })
-  );
+        })
+    );
+  }
 }

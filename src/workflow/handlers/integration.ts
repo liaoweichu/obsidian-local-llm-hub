@@ -1,7 +1,7 @@
 import { App, TFile, WorkspaceLeaf } from "obsidian";
 import type { LocalLlmHubPlugin } from "../../plugin";
 import { getRagStore } from "../../core/ragStore";
-import { WORKSPACE_FOLDER } from "../../types";
+
 import { WorkflowNode, ExecutionContext, PromptCallbacks } from "../types";
 import { replaceVariables } from "./utils";
 
@@ -114,8 +114,14 @@ export async function handleRagSyncNode(
   const path = replaceVariables(node.properties["path"] || "", context);
   const oldPath = replaceVariables(node.properties["oldPath"] || "", context);
 
-  if (!plugin.settings.ragConfig.enabled) {
-    throw new Error("RAG is not enabled. Please enable RAG in settings first.");
+  // Determine which RAG setting to use
+  const settingName = node.properties["ragSetting"] || plugin.getSelectedRagSettingName();
+  if (!settingName) {
+    throw new Error("No RAG setting selected. Please select or create a RAG setting first.");
+  }
+  const ragSetting = plugin.getRagSetting(settingName);
+  if (!ragSetting) {
+    throw new Error(`RAG setting "${settingName}" not found.`);
   }
 
   const store = getRagStore();
@@ -124,9 +130,9 @@ export async function handleRagSyncNode(
     // Single file sync
     const result = await store.syncFile(
       app,
-      plugin.settings.ragConfig,
+      settingName,
+      ragSetting,
       plugin.settings.llmConfig,
-      WORKSPACE_FOLDER,
       path,
       oldPath || undefined,
     );
@@ -138,9 +144,9 @@ export async function handleRagSyncNode(
     // Full sync (no path specified)
     const result = await store.sync(
       app,
-      plugin.settings.ragConfig,
+      settingName,
+      ragSetting,
       plugin.settings.llmConfig,
-      WORKSPACE_FOLDER,
     );
 
     if (saveTo) {
