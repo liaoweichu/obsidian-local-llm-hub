@@ -103,6 +103,8 @@ export interface Attachment {
   type: "image" | "pdf" | "text" | "audio" | "video";
   mimeType: string;
   data: string;  // Base64 encoded
+  sourcePath?: string;  // RAG検索結果のソースファイルパス
+  pageLabel?: string;  // PDFページ範囲（例: "pages 1-6 of 24"）
 }
 
 export interface Message {

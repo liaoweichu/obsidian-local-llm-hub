@@ -3,6 +3,8 @@ import {
   useEffect,
   useRef,
   useCallback,
+  forwardRef,
+  useImperativeHandle,
 } from "react";
 import { TFile, Notice } from "obsidian";
 import { Plus, History, Trash2, FileText, Loader2, Check } from "lucide-react";
@@ -42,11 +44,16 @@ import InputArea, { type InputAreaHandle } from "./InputArea";
 import { t } from "src/i18n";
 import { formatError } from "src/utils/error";
 
+export interface ChatRef {
+  addAttachments: (attachments: Attachment[]) => void;
+  clearRag: () => void;
+}
+
 interface ChatProps {
   plugin: LocalLlmHubPlugin;
 }
 
-export default function Chat({ plugin }: ChatProps) {
+const Chat = forwardRef<ChatRef, ChatProps>(({ plugin }, ref) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [streamingContent, setStreamingContent] = useState("");
@@ -76,6 +83,14 @@ export default function Chat({ plugin }: ChatProps) {
   const llmConfig = { ...baseLlmConfig, model: currentModel || baseLlmConfig.model };
   const ragAvailable = ragSettingNames.length > 0;
   const availableModels = plugin.settings.availableModels || [];
+
+  useImperativeHandle(ref, () => ({
+    addAttachments: (attachments: Attachment[]) => inputAreaRef.current?.addAttachments(attachments),
+    clearRag: () => {
+      setSelectedRagSetting(null);
+      void plugin.selectRagSetting(null);
+    },
+  }));
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -851,7 +866,11 @@ export default function Chat({ plugin }: ChatProps) {
       />
     </div>
   );
-}
+});
+
+Chat.displayName = "Chat";
+
+export default Chat;
 
 function generateChatTitle(messages: Message[]): string {
   const firstUserMsg = messages.find(m => m.role === "user");

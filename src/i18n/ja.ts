@@ -726,4 +726,25 @@ export const ja: Record<string, string> = {
   "workflow.generation.thinking": "思考中...",
   "workflow.generation.parseFailed": "生成されたワークフローの解析に失敗しました",
   "workflow.generation.executionHistoryIncluded": "実行履歴をコンテキストとして含めました",
+
+  // Search tab
+  "search.tab": "RAG検索",
+  "search.queryPlaceholder": "検索クエリを入力...",
+  "search.search": "検索",
+  "search.noRagSetting": "RAG設定が選択されていません",
+  "search.noRagSettings": "RAG設定がありません",
+  "search.noRagSettingsGuide": "プラグイン設定でRAGを登録すると、セマンティック検索が利用できるようになります。",
+  "search.openSettings": "設定を開く",
+  "search.enterQuery": "検索クエリを入力してください",
+  "search.ragSettingNotFound": "RAG設定が見つかりません",
+  "search.searchFailed": "検索に失敗しました",
+  "search.noResults": "結果が見つかりませんでした",
+  "search.selectAll": "すべて選択",
+  "search.results": "件",
+  "search.chatWithSelected": "選択してチャット",
+  "search.selectResults": "少なくとも1つの結果を選択してください",
+  "search.scoreThreshold": "最低スコア",
+
+  // RAG source modal
+  "ragSource.clickToView": "クリックしてRAGテキストを表示・編集",
 };

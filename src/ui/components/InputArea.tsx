@@ -4,6 +4,7 @@ import { Notice, type App } from "obsidian";
 import type { Attachment, VaultToolMode } from "src/types";
 import type { McpServerInfo } from "src/core/mcpManager";
 import type { SkillMetadata } from "src/core/skillsLoader";
+import { RagSourceModal } from "./RagSourceModal";
 import SkillSelector from "./SkillSelector";
 import { t } from "src/i18n";
 
@@ -46,6 +47,7 @@ export interface InputAreaHandle {
   setInputValue: (value: string) => void;
   getInputValue: () => string;
   focus: () => void;
+  addAttachments: (attachments: Attachment[]) => void;
 }
 
 // Mention candidates
@@ -131,6 +133,7 @@ const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(function InputArea
     setInputValue: (value: string) => setInput(value),
     getInputValue: () => input,
     focus: () => textareaRef.current?.focus(),
+    addAttachments: (attachments: Attachment[]) => setPendingAttachments(prev => [...prev, ...attachments]),
   }));
 
   // Auto-resize textarea
@@ -394,14 +397,28 @@ const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(function InputArea
       {pendingAttachments.length > 0 && (
         <div className="llm-hub-pending-attachments">
           {pendingAttachments.map((attachment, index) => (
-            <span key={index} className="llm-hub-pending-attachment">
+            <span
+              key={index}
+              className={`llm-hub-pending-attachment${attachment.sourcePath ? " llm-hub-clickable" : ""}`}
+              onClick={() => {
+                if (!attachment.sourcePath) return;
+                new RagSourceModal(app, attachment, (result) => {
+                  setPendingAttachments(prev => {
+                    const next = [...prev];
+                    next[index] = result.attachment;
+                    return next;
+                  });
+                }).open();
+              }}
+              title={attachment.sourcePath ? t("ragSource.clickToView") : undefined}
+            >
               {attachment.type === "image" && "🖼️"}
               {attachment.type === "pdf" && "📄"}
               {attachment.type === "text" && "📃"}
               {" "}{attachment.name}
               <button
                 className="llm-hub-pending-attachment-remove"
-                onClick={() => removeAttachment(index)}
+                onClick={(e) => { e.stopPropagation(); removeAttachment(index); }}
                 title={t("input.removeAttachment")}
               >
                 ×

@@ -1,9 +1,12 @@
-import { forwardRef, useImperativeHandle, useState } from "react";
+import { forwardRef, useCallback, useImperativeHandle, useRef, useState } from "react";
 import type { LocalLlmHubPlugin } from "src/plugin";
-import Chat from "./Chat";
+import type { Attachment } from "src/types";
+import Chat, { type ChatRef } from "./Chat";
+import SearchPanel from "./SearchPanel";
 import WorkflowPanel from "./workflow/WorkflowPanel";
+import { t } from "src/i18n";
 
-export type TabType = "chat" | "workflow";
+export type TabType = "chat" | "search" | "workflow";
 
 export interface TabContainerRef {
   setActiveTab: (tab: TabType) => void;
@@ -16,10 +19,17 @@ interface TabContainerProps {
 const TabContainer = forwardRef<TabContainerRef, TabContainerProps>(
   ({ plugin }, ref) => {
     const [activeTab, setActiveTab] = useState<TabType>("chat");
+    const chatRef = useRef<ChatRef>(null);
 
     useImperativeHandle(ref, () => ({
       setActiveTab,
     }));
+
+    const handleChatWithResults = useCallback((attachments: Attachment[]) => {
+      chatRef.current?.addAttachments(attachments);
+      chatRef.current?.clearRag();
+      setActiveTab("chat");
+    }, []);
 
     return (
       <div className="llm-hub-tab-container">
@@ -31,6 +41,12 @@ const TabContainer = forwardRef<TabContainerRef, TabContainerProps>(
             Chat
           </button>
           <button
+            className={`llm-hub-tab ${activeTab === "search" ? "active" : ""}`}
+            onClick={() => setActiveTab("search")}
+          >
+            {t("search.tab")}
+          </button>
+          <button
             className={`llm-hub-tab ${activeTab === "workflow" ? "active" : ""}`}
             onClick={() => setActiveTab("workflow")}
           >
@@ -39,7 +55,10 @@ const TabContainer = forwardRef<TabContainerRef, TabContainerProps>(
         </div>
         <div className="llm-hub-tab-content">
           <div className={`llm-hub-tab-panel ${activeTab === "chat" ? "is-active" : ""}`}>
-            <Chat plugin={plugin} />
+            <Chat ref={chatRef} plugin={plugin} />
+          </div>
+          <div className={`llm-hub-tab-panel ${activeTab === "search" ? "is-active" : ""}`}>
+            <SearchPanel plugin={plugin} onChatWithResults={handleChatWithResults} />
           </div>
           <div className={`llm-hub-tab-panel ${activeTab === "workflow" ? "is-active" : ""}`}>
             <WorkflowPanel plugin={plugin} />

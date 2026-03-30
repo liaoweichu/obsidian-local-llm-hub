@@ -730,6 +730,27 @@ export const en = {
   "command.runWorkflow": "Run workflow",
   "command.compact": "Compress conversation history",
   "command.generateWorkflow": "Generate workflow with AI",
+
+  // Search tab
+  "search.tab": "Rag search",
+  "search.queryPlaceholder": "Enter search query...",
+  "search.search": "Search",
+  "search.noRagSetting": "No rag setting selected",
+  "search.noRagSettings": "No rag settings available",
+  "search.noRagSettingsGuide": "Register a rag setting in the plugin settings to enable semantic search.",
+  "search.openSettings": "Open settings",
+  "search.enterQuery": "Please enter a search query",
+  "search.ragSettingNotFound": "Rag setting not found",
+  "search.searchFailed": "Search failed",
+  "search.noResults": "No results found",
+  "search.selectAll": "Select all",
+  "search.results": "Results",
+  "search.chatWithSelected": "Chat with selected",
+  "search.selectResults": "Please select at least one result",
+  "search.scoreThreshold": "Min score",
+
+  // RAG source modal
+  "ragSource.clickToView": "Click to view/edit rag text",
 } as const;
 
 export type TranslationKey = keyof typeof en;
