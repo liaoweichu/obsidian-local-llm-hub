@@ -5,6 +5,5 @@
 	"description": "Chat with local LLMs (Ollama, LM Studio, AnythingLLM) with local embeddings RAG, file encryption, edit history, slash commands, and workflow automation.",
 	"author": "takeshy",
 	"authorUrl": "https://github.com/takeshy",
-	"isDesktopOnly": true,
-	"version": "0.6.0"
+	"isDesktopOnly": true
 }
