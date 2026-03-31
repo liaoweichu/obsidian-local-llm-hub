@@ -170,7 +170,7 @@ export const en = {
   "input.ragChunkSize": "Chunk size",
   "input.ragChunkOverlap": "Chunk overlap",
   "input.ragTargetFolders": "Target folders",
-  "input.ragTargetFolders.placeholder": "e.g. notes, projects, docs",
+  "input.ragTargetFolders.placeholder": "Notes, projects, docs",
   "input.ragExcludedPatterns": "Excluded patterns (regex)",
   "input.ragExcludedPatterns.placeholder": "e.g. ^daily/",
   "input.ragIndexedFiles": "Indexed files ({{count}})",
