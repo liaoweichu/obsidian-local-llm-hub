@@ -37,6 +37,18 @@ export interface RagStatus {
   indexedFiles: number;
 }
 
+function createAbortError(): Error {
+  const error = new Error("Sync aborted");
+  error.name = "AbortError";
+  return error;
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw createAbortError();
+  }
+}
+
 interface StoreEntry {
   index: RagIndex | null;
   vectors: Float32Array | null;
@@ -103,6 +115,7 @@ class RagStore {
     settingName: string,
     ragSetting: RagSetting,
     llmConfig: LocalLlmConfig,
+    signal?: AbortSignal,
   ): Promise<SyncResult> {
     // Get markdown files matching target/exclude criteria
     const files = getTargetFiles(app, ragSetting);
@@ -112,6 +125,7 @@ class RagStore {
     const fileContents = new Map<string, string>();
 
     for (const file of files) {
+      throwIfAborted(signal);
       const content = await app.vault.cachedRead(file);
       const checksum = simpleChecksum(content);
       newChecksums[file.path] = checksum;
@@ -126,7 +140,13 @@ class RagStore {
     let { index, vectors } = entry;
     const incompatible = entry.incompatibleIndexLoaded;
 
-    if (incompatible) {
+    // Check if chunk params changed → full rebuild needed
+    const needsFullRebuild = !incompatible && index !== null && (
+      index.chunkSize !== ragSetting.chunkSize ||
+      index.chunkOverlap !== ragSetting.chunkOverlap
+    );
+
+    if (incompatible || needsFullRebuild) {
       index = null;
       vectors = null;
     }
@@ -169,6 +189,7 @@ class RagStore {
       const allMetas: ChunkMeta[] = [];
 
       for (const filePath of changedFiles) {
+        throwIfAborted(signal);
         const content = fileContents.get(filePath);
         if (!content) continue;
 
@@ -189,8 +210,10 @@ class RagStore {
       // Batch embed (max 32 at a time)
       const BATCH_SIZE = 32;
       for (let i = 0; i < allTexts.length; i += BATCH_SIZE) {
+        throwIfAborted(signal);
         const batch = allTexts.slice(i, i + BATCH_SIZE);
         const embeddings = await generateEmbeddings(batch, ragSetting, llmConfig);
+        throwIfAborted(signal);
         newEmbeddings.push(...embeddings);
       }
 
@@ -210,12 +233,16 @@ class RagStore {
       newVectors.set(allVectorArrays[i], i * dimension);
     }
 
+    throwIfAborted(signal);
+
     // Save
     const newIndex: RagIndex = {
       meta: allMeta,
       dimension,
       fileChecksums: newChecksums,
       embeddingFormatVersion: EMBEDDING_FORMAT_VERSION,
+      chunkSize: ragSetting.chunkSize,
+      chunkOverlap: ragSetting.chunkOverlap,
     };
 
     this.entries.set(settingName, {
@@ -328,6 +355,8 @@ class RagStore {
       dimension: newDimension,
       fileChecksums: checksums,
       embeddingFormatVersion: EMBEDDING_FORMAT_VERSION,
+      chunkSize: ragSetting.chunkSize,
+      chunkOverlap: ragSetting.chunkOverlap,
     };
 
     this.entries.set(settingName, {
@@ -387,6 +416,19 @@ class RagStore {
       filePath: index.meta[idx].filePath,
       score,
     }));
+  }
+
+  /** Return indexed files with per-file chunk counts, sorted by file path. */
+  async getIndexedFiles(app: App, settingName: string): Promise<{ filePath: string; chunks: number }[]> {
+    const entry = await this.ensureLoaded(app, settingName);
+    if (!entry.index) return [];
+    const counts = new Map<string, number>();
+    for (const m of entry.index.meta) {
+      counts.set(m.filePath, (counts.get(m.filePath) ?? 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .map(([filePath, chunks]) => ({ filePath, chunks }))
+      .sort((a, b) => a.filePath.localeCompare(b.filePath));
   }
 
   /**

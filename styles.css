@@ -4512,6 +4512,197 @@ body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) 
   flex-shrink: 0;
 }
 
+.llm-hub-search-rag-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.llm-hub-search-rag-selector .llm-hub-rag-select {
+  flex: 1;
+  max-width: none;
+}
+
+/* Text button (sync / config toggle) */
+.llm-hub-rag-text-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  font-size: 11px;
+  white-space: nowrap;
+  transition: color 0.1s, background 0.1s;
+}
+
+.llm-hub-rag-text-btn:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+.llm-hub-rag-text-btn.syncing {
+  color: var(--text-error);
+  border-color: var(--text-error);
+}
+
+.llm-hub-rag-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color 0.1s, background 0.1s;
+}
+
+.llm-hub-rag-icon-btn:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+.llm-hub-rag-text-btn.syncing:hover {
+  opacity: 0.9;
+}
+
+/* RAG config section (collapsible) */
+.llm-hub-rag-config-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 8px;
+  background: var(--background-primary-alt);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+}
+
+.llm-hub-rag-config-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.llm-hub-rag-config-row > label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.llm-hub-rag-config-row input[type="range"] {
+  width: 100%;
+  accent-color: var(--interactive-accent);
+}
+
+.llm-hub-rag-config-input {
+  width: 100%;
+  padding: 4px 8px;
+  font-size: 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+}
+
+.llm-hub-rag-config-textarea {
+  width: 100%;
+  padding: 4px 8px;
+  font-size: 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  resize: vertical;
+  font-family: var(--font-monospace);
+}
+
+.llm-hub-rag-last-sync {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.llm-hub-rag-config-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Indexed files accordion */
+.llm-hub-rag-indexed-files-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 4px 0;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 0.1s;
+}
+
+.llm-hub-rag-indexed-files-toggle:hover {
+  color: var(--text-normal);
+}
+
+.llm-hub-rag-indexed-files-list {
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: var(--background-primary);
+}
+
+.llm-hub-rag-indexed-files-empty {
+  padding: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.llm-hub-rag-indexed-file-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 3px 8px;
+  font-size: 11px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.llm-hub-rag-indexed-file-item:last-child {
+  border-bottom: none;
+}
+
+.llm-hub-rag-indexed-file-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-accent);
+  cursor: pointer;
+}
+
+.llm-hub-rag-indexed-file-path:hover {
+  text-decoration: underline;
+}
+
+.llm-hub-rag-indexed-file-chunks {
+  flex-shrink: 0;
+  margin-left: 8px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
 .llm-hub-search-params {
   display: flex;
   align-items: center;

@@ -468,6 +468,27 @@ const Chat = forwardRef<ChatRef, ChatProps>(({ plugin }, ref) => {
     }
   }, [messages, isLoading, isCompacting, plugin, llmConfig, saveCurrentChat]);
 
+  // Decode text attachments and build context string for LLM
+  const buildAttachmentContext = (atts?: Attachment[]): string => {
+    if (!atts || atts.length === 0) return "";
+    const sections = atts.map((att) => {
+      const header = `Attachment: ${att.name} (${att.mimeType || att.type})`;
+      if (att.type === "text") {
+        try {
+          const decoded = decodeURIComponent(escape(atob(att.data))).trim();
+          const content = decoded.length > 12000
+            ? `${decoded.slice(0, 12000)}\n[Truncated]`
+            : decoded;
+          return `--- ${header} ---\n${content || "[Empty text attachment]"}\n--- End Attachment ---`;
+        } catch {
+          return `--- ${header} ---\n[Failed to decode]\n--- End Attachment ---`;
+        }
+      }
+      return `--- ${header} ---\nBinary attachment metadata only.\n--- End Attachment ---`;
+    });
+    return `\n\nAttached files:\n\n${sections.join("\n\n")}`;
+  };
+
   // Send message
   const sendMessage = useCallback(async (content: string, attachments?: Attachment[], skillPath?: string) => {
     if (!plugin.settings.llmVerified) {
@@ -494,9 +515,13 @@ const Chat = forwardRef<ChatRef, ChatProps>(({ plugin }, ref) => {
       displayContent = `[${attachments.length} file(s) attached]`;
     }
 
+    // Build LLM content including decoded text attachments
+    const llmContent = `${resolvedContent}${buildAttachmentContext(attachments)}`.trim();
+
     const userMessage: Message = {
       role: "user",
       content: displayContent,
+      llmContent: llmContent || displayContent,
       timestamp: Date.now(),
       attachments,
     };

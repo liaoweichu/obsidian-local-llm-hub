@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { Search, MessageSquare, FileText, ChevronDown, Loader2 } from "lucide-react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { Search, MessageSquare, FileText, ChevronDown, Loader2, Settings2, RefreshCw } from "lucide-react";
 import { Notice } from "obsidian";
 import type { LocalLlmHubPlugin } from "src/plugin";
 import type { Attachment } from "src/types";
@@ -36,6 +36,42 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
     return setting?.minScore ?? DEFAULT_RAG_SETTING.minScore;
   });
 
+  // RAG settings section state
+  const [showRagConfig, setShowRagConfig] = useState(false);
+  const [chunkSize, setChunkSize] = useState(() => {
+    const setting = plugin.getRagSetting(
+      plugin.getSelectedRagSettingName() ?? ragSettingNames[0] ?? ""
+    );
+    return setting?.chunkSize ?? DEFAULT_RAG_SETTING.chunkSize;
+  });
+  const [chunkOverlap, setChunkOverlap] = useState(() => {
+    const setting = plugin.getRagSetting(
+      plugin.getSelectedRagSettingName() ?? ragSettingNames[0] ?? ""
+    );
+    return setting?.chunkOverlap ?? DEFAULT_RAG_SETTING.chunkOverlap;
+  });
+  const [targetFolders, setTargetFolders] = useState(() => {
+    const setting = plugin.getRagSetting(
+      plugin.getSelectedRagSettingName() ?? ragSettingNames[0] ?? ""
+    );
+    return setting?.targetFolders?.join(", ") ?? "";
+  });
+  const [excludePatterns, setExcludePatterns] = useState(() => {
+    const setting = plugin.getRagSetting(
+      plugin.getSelectedRagSettingName() ?? ragSettingNames[0] ?? ""
+    );
+    return setting?.excludePatterns?.join("\n") ?? "";
+  });
+  const [ragSyncing, setRagSyncing] = useState(false);
+  const ragSyncCancelRef = useRef(false);
+  const ragSyncAbortRef = useRef<AbortController | null>(null);
+  const [indexedFiles, setIndexedFiles] = useState<{ filePath: string; chunks: number }[]>([]);
+  const [showIndexedFiles, setShowIndexedFiles] = useState(false);
+
+  // Check if current setting is internal (not external index)
+  const currentRagSetting = plugin.getRagSetting(selectedRagSetting);
+  const isInternalRag = currentRagSetting ? !currentRagSetting.externalIndexPath : false;
+
   useEffect(() => {
     const syncRagSettings = () => {
       const names = plugin.getRagSettingNames();
@@ -60,6 +96,10 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
     const setting = plugin.getRagSetting(selectedRagSetting);
     setTopK(setting?.topK ?? DEFAULT_RAG_SETTING.topK);
     setScoreThreshold(setting?.minScore ?? DEFAULT_RAG_SETTING.minScore);
+    setChunkSize(setting?.chunkSize ?? DEFAULT_RAG_SETTING.chunkSize);
+    setChunkOverlap(setting?.chunkOverlap ?? DEFAULT_RAG_SETTING.chunkOverlap);
+    setTargetFolders(setting?.targetFolders?.join(", ") ?? "");
+    setExcludePatterns(setting?.excludePatterns?.join("\n") ?? "");
   }, [plugin, selectedRagSetting]);
 
   const handleRagSettingChange = (name: string) => {
@@ -68,8 +108,115 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
     if (setting) {
       setTopK(setting.topK);
       setScoreThreshold(setting.minScore);
+      setChunkSize(setting.chunkSize);
+      setChunkOverlap(setting.chunkOverlap);
+      setTargetFolders(setting.targetFolders?.join(", ") ?? "");
+      setExcludePatterns(setting.excludePatterns?.join("\n") ?? "");
     }
   };
+
+  // Handle RAG config field updates
+  const handleChunkSizeChange = useCallback((value: number) => {
+    setChunkSize(value);
+    if (selectedRagSetting) {
+      void plugin.updateRagSetting(selectedRagSetting, { chunkSize: value });
+    }
+  }, [plugin, selectedRagSetting]);
+
+  const handleChunkOverlapChange = useCallback((value: number) => {
+    setChunkOverlap(value);
+    if (selectedRagSetting) {
+      void plugin.updateRagSetting(selectedRagSetting, { chunkOverlap: value });
+    }
+  }, [plugin, selectedRagSetting]);
+
+  const handleTargetFoldersChange = useCallback((value: string) => {
+    setTargetFolders(value);
+    if (selectedRagSetting) {
+      const folders = value
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+      void plugin.updateRagSetting(selectedRagSetting, { targetFolders: folders });
+    }
+  }, [plugin, selectedRagSetting]);
+
+  const handleExcludePatternsChange = useCallback((value: string) => {
+    setExcludePatterns(value);
+    if (selectedRagSetting) {
+      const patterns = value
+        .split("\n")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+      void plugin.updateRagSetting(selectedRagSetting, { excludePatterns: patterns });
+    }
+  }, [plugin, selectedRagSetting]);
+
+  // Load indexed files list
+  const loadIndexedFiles = useCallback(async () => {
+    const store = getRagStore();
+    if (!selectedRagSetting) {
+      setIndexedFiles([]);
+      return;
+    }
+    const files = await store.getIndexedFiles(plugin.app, selectedRagSetting);
+    setIndexedFiles(files);
+  }, [plugin, selectedRagSetting]);
+
+  // Load indexed files when config section is opened
+  useEffect(() => {
+    if (showRagConfig) {
+      void loadIndexedFiles();
+    }
+  }, [showRagConfig, loadIndexedFiles]);
+
+  // Handle RAG sync
+  const handleRagSync = useCallback(async () => {
+    if (ragSyncing) {
+      ragSyncCancelRef.current = true;
+      ragSyncAbortRef.current?.abort();
+      return;
+    }
+    if (!selectedRagSetting) return;
+
+    const ragSetting = plugin.getRagSetting(selectedRagSetting);
+    if (!ragSetting) return;
+
+    setRagSyncing(true);
+    ragSyncCancelRef.current = false;
+    const abortController = new AbortController();
+    ragSyncAbortRef.current = abortController;
+
+    try {
+      const store = getRagStore();
+      const result = await store.sync(
+        plugin.app,
+        selectedRagSetting,
+        ragSetting,
+        plugin.settings.llmConfig,
+        abortController.signal,
+      );
+      if (!ragSyncCancelRef.current) {
+        new Notice(t("settings.ragSynced", {
+          count: String(result.totalChunks),
+          files: String(result.indexedFiles),
+        }));
+        void plugin.updateRagSetting(selectedRagSetting, { lastFullSync: Date.now() });
+        void loadIndexedFiles();
+      }
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        new Notice(t("settings.syncCancelled"));
+        return;
+      }
+      const msg = error instanceof Error ? error.message : String(error);
+      new Notice(t("settings.ragSyncFailed", { error: msg }));
+    } finally {
+      setRagSyncing(false);
+      ragSyncCancelRef.current = false;
+      ragSyncAbortRef.current = null;
+    }
+  }, [plugin, selectedRagSetting, ragSyncing, loadIndexedFiles]);
 
   const handleSearch = async () => {
     if (isSearching) return;
@@ -208,7 +355,7 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
             value={selectedRagSetting}
             onChange={e => handleRagSettingChange(e.target.value)}
             className="llm-hub-model-select llm-hub-rag-select"
-            disabled={isSearching}
+            disabled={isSearching || ragSyncing}
           >
             {ragSettingNames.map(name => (
               <option key={name} value={name}>
@@ -216,7 +363,129 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
               </option>
             ))}
           </select>
+          <button
+            className="llm-hub-rag-icon-btn"
+            onClick={() => setShowRagConfig(!showRagConfig)}
+            title={t("input.ragSettings")}
+            disabled={ragSyncing}
+          >
+            <Settings2 size={14} />
+          </button>
         </div>
+        {showRagConfig && (
+          <div className="llm-hub-rag-config-section">
+            {isInternalRag && (
+              <>
+                <div className="llm-hub-rag-config-row">
+                  <label>{t("input.ragChunkSize")}: {chunkSize}</label>
+                  <input
+                    type="range"
+                    min={100}
+                    max={2000}
+                    step={50}
+                    value={chunkSize}
+                    onChange={e => handleChunkSizeChange(Number(e.target.value))}
+                  />
+                </div>
+                <div className="llm-hub-rag-config-row">
+                  <label>{t("input.ragChunkOverlap")}: {chunkOverlap}</label>
+                  <input
+                    type="range"
+                    min={0}
+                    max={500}
+                    step={10}
+                    value={chunkOverlap}
+                    onChange={e => handleChunkOverlapChange(Number(e.target.value))}
+                  />
+                </div>
+                <div className="llm-hub-rag-config-row">
+                  <label>{t("input.ragTargetFolders")}</label>
+                  <input
+                    type="text"
+                    className="llm-hub-rag-config-input"
+                    placeholder={t("input.ragTargetFolders.placeholder")}
+                    value={targetFolders}
+                    onChange={e => handleTargetFoldersChange(e.target.value)}
+                  />
+                </div>
+                <div className="llm-hub-rag-config-row">
+                  <label>{t("input.ragExcludedPatterns")}</label>
+                  <textarea
+                    className="llm-hub-rag-config-textarea"
+                    placeholder={t("input.ragExcludedPatterns.placeholder")}
+                    value={excludePatterns}
+                    rows={3}
+                    onChange={e => handleExcludePatternsChange(e.target.value)}
+                  />
+                </div>
+              </>
+            )}
+            {/* Last sync timestamp */}
+            {currentRagSetting?.lastFullSync && (
+              <div className="llm-hub-rag-last-sync">
+                {t("input.ragLastSync")}: {new Date(currentRagSetting.lastFullSync).toLocaleString()}
+              </div>
+            )}
+            {/* Indexed files accordion */}
+            <div className="llm-hub-rag-indexed-files">
+              <button
+                className="llm-hub-rag-indexed-files-toggle"
+                onClick={() => setShowIndexedFiles(!showIndexedFiles)}
+              >
+                <ChevronDown size={12} className={showIndexedFiles ? "llm-hub-chevron-rotated" : ""} />
+                {t("input.ragIndexedFiles", { count: String(indexedFiles.length) })}
+              </button>
+              {showIndexedFiles && (
+                <div className="llm-hub-rag-indexed-files-list">
+                  {indexedFiles.length === 0 ? (
+                    <div className="llm-hub-rag-indexed-files-empty">{t("input.ragNoIndexedFiles")}</div>
+                  ) : (
+                    indexedFiles.map(f => (
+                      <div key={f.filePath} className="llm-hub-rag-indexed-file-item">
+                        <span
+                          className="llm-hub-rag-indexed-file-path"
+                          onClick={() => {
+                            const file = plugin.app.vault.getAbstractFileByPath(f.filePath);
+                            if (file) {
+                              void plugin.app.workspace.openLinkText(f.filePath, "", false);
+                            } else {
+                              new Notice(f.filePath, 5000);
+                            }
+                          }}
+                        >
+                          {f.filePath}
+                        </span>
+                        <span className="llm-hub-rag-indexed-file-chunks">
+                          {f.chunks} chunks
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+            <div className="llm-hub-rag-config-actions">
+              {isInternalRag && (
+                <button
+                  className={`llm-hub-rag-text-btn ${ragSyncing ? "syncing" : ""}`}
+                  onClick={() => { void handleRagSync(); }}
+                >
+                  {ragSyncing ? (
+                    <><Loader2 size={12} className="llm-hub-spinner" /> {t("settings.cancelSync")}</>
+                  ) : (
+                    <><RefreshCw size={12} /> {t("settings.ragSync")}</>
+                  )}
+                </button>
+              )}
+              <button
+                className="llm-hub-rag-text-btn"
+                onClick={() => setShowRagConfig(false)}
+              >
+                {t("input.close")}
+              </button>
+            </div>
+          </div>
+        )}
         <div className="llm-hub-search-params">
           <label className="llm-hub-search-param-label">
             Top K:

@@ -28,6 +28,7 @@ export function messagesToMarkdown(
     // Save metadata as HTML comment
     const metadata: Record<string, unknown> = {};
     if (msg.thinking) metadata.thinking = msg.thinking;
+    if (msg.llmContent && msg.llmContent !== msg.content) metadata.llmContent = msg.llmContent;
     if (msg.ragUsed) metadata.ragUsed = msg.ragUsed;
     if (msg.ragSources) metadata.ragSources = msg.ragSources;
     if (msg.skillsUsed) metadata.skillsUsed = msg.skillsUsed;
@@ -99,6 +100,7 @@ export function parseMarkdownToMessages(content: string): { messages: Message[];
           try {
             const meta = JSON.parse(metadataMatch[1]) as Record<string, unknown>;
             if (meta.thinking) message.thinking = meta.thinking as string;
+            if (meta.llmContent) message.llmContent = meta.llmContent as string;
             if (meta.ragUsed) message.ragUsed = meta.ragUsed as boolean;
             if (meta.ragSources) message.ragSources = meta.ragSources as string[];
             if (meta.skillsUsed) message.skillsUsed = meta.skillsUsed as string[];

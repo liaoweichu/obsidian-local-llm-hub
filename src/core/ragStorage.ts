@@ -18,6 +18,8 @@ export interface RagIndex {
   dimension: number;
   fileChecksums: Record<string, string>; // filePath -> checksum
   embeddingFormatVersion?: number;
+  chunkSize?: number;
+  chunkOverlap?: number;
 }
 
 const RAG_DIR = `${WORKSPACE_FOLDER}/rag`;

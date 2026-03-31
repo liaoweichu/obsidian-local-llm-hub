@@ -31,6 +31,7 @@ export interface RagSetting {
   targetFolders: string[];      // folders to index (empty = all)
   excludePatterns: string[];    // regex patterns to exclude
   externalIndexPath: string;    // absolute path to external index directory (empty = vault sync)
+  lastFullSync: number | null;  // timestamp of last full sync
 }
 
 export const DEFAULT_RAG_SETTING: RagSetting = {
@@ -43,6 +44,7 @@ export const DEFAULT_RAG_SETTING: RagSetting = {
   targetFolders: [],
   excludePatterns: [],
   externalIndexPath: "",
+  lastFullSync: null,
 };
 
 // Workspace state (persisted in workspace-state.json)
@@ -110,6 +112,7 @@ export interface Attachment {
 export interface Message {
   role: "user" | "assistant" | "tool";
   content: string;
+  llmContent?: string;          // full content sent to the LLM (hidden from UI)
   timestamp: number;
   model?: string;               // model name (assistant only)
   attachments?: Attachment[];

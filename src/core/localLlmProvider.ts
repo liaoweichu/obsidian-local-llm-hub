@@ -223,7 +223,7 @@ async function* ollamaChatStream(
     } else {
       ollamaMessages.push({
         role: msg.role === "user" ? "user" : "assistant",
-        content: msg.content,
+        content: msg.llmContent ?? msg.content,
       });
     }
   }
@@ -464,7 +464,7 @@ async function* openaiChatStream(
     } else {
       openaiMessages.push({
         role: msg.role === "user" ? "user" : "assistant",
-        content: msg.content,
+        content: msg.llmContent ?? msg.content,
       });
     }
   }
