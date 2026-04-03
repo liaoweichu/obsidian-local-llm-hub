@@ -147,7 +147,6 @@ export const en = {
 
   // Input
   "skills.add": "Add skill",
-  "skills.noSkills": "No skills found",
   "skills.skill": "Skill",
 
   "input.placeholder": "Type your message... (Enter to send, Shift+Enter for new line)",

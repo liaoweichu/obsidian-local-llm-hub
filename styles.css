@@ -4353,10 +4353,6 @@ body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) 
   opacity: 1;
 }
 
-.llm-hub-skill-dropdown-wrapper {
-  position: relative;
-}
-
 .llm-hub-skill-add-btn {
   display: inline-flex;
   align-items: center;
@@ -4377,25 +4373,15 @@ body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) 
 }
 
 .llm-hub-skill-dropdown {
-  position: absolute;
-  bottom: 100%;
-  left: 0;
-  z-index: var(--layer-popover);
+  position: fixed;
+  z-index: 10000;
+  max-height: 300px;
   background: var(--background-primary);
   border: 1px solid var(--background-modifier-border);
   border-radius: 6px;
   box-shadow: var(--shadow-s);
-  min-width: 200px;
-  max-height: 240px;
   overflow-y: auto;
   padding: 4px;
-  margin-bottom: 4px;
-}
-
-.llm-hub-skill-dropdown-empty {
-  padding: 8px 12px;
-  color: var(--text-muted);
-  font-size: 12px;
 }
 
 .llm-hub-skill-dropdown-item {
@@ -4424,13 +4410,26 @@ body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) 
 }
 
 .llm-hub-skill-dropdown-name {
-  font-size: 12px;
   font-weight: 500;
+  color: var(--text-normal);
+}
+
+.llm-hub-skill-builtin-badge {
+  font-size: 9px;
+  font-weight: 500;
+  color: var(--text-on-accent);
+  background-color: var(--interactive-accent);
+  padding: 1px 4px;
+  border-radius: 3px;
+  margin-left: 4px;
+  vertical-align: middle;
+  opacity: 0.8;
 }
 
 .llm-hub-skill-dropdown-desc {
   font-size: 11px;
   color: var(--text-muted);
+  white-space: normal;
 }
 
 /* Skills Used indicator (in message bubble) */

@@ -22,6 +22,7 @@ import { EXECUTE_JAVASCRIPT_TOOL } from "src/core/sandboxExecutor";
 import { executeToolCall } from "src/core/toolExecutor";
 import { getRagStore } from "src/core/ragStore";
 import { discoverSkills, loadSkill, buildSkillSystemPrompt, collectSkillWorkflows, type SkillMetadata, type LoadedSkill, type SkillWorkflowRef } from "src/core/skillsLoader";
+import { DEFAULT_BUILTIN_SKILL_IDS, builtinFolderPath, getBuiltinSkillMetadata } from "src/core/builtinSkills";
 import { parseWorkflowFromMarkdown } from "src/workflow/parser";
 import { WorkflowExecutor } from "src/workflow/executor";
 import type { McpServerInfo } from "src/core/mcpManager";
@@ -69,8 +70,10 @@ const Chat = forwardRef<ChatRef, ChatProps>(({ plugin }, ref) => {
   const [vaultToolMode, setVaultToolMode] = useState<VaultToolMode>("all");
   const [vaultFiles, setVaultFiles] = useState<string[]>([]);
   const [hasSelection, setHasSelection] = useState(false);
-  const [availableSkills, setAvailableSkills] = useState<SkillMetadata[]>([]);
-  const [activeSkillPaths, setActiveSkillPaths] = useState<string[]>([]);
+  const [availableSkills, setAvailableSkills] = useState<SkillMetadata[]>(getBuiltinSkillMetadata);
+  const [activeSkillPaths, setActiveSkillPaths] = useState<string[]>(
+    () => DEFAULT_BUILTIN_SKILL_IDS.map(builtinFolderPath)
+  );
   const [mcpServerInfos, setMcpServerInfos] = useState<McpServerInfo[]>([]);
   const [enabledMcpServerIds, setEnabledMcpServerIds] = useState<Set<string>>(new Set());
 
@@ -395,6 +398,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({ plugin }, ref) => {
     setStreamingThinking("");
     chatCreatedAt.current = Date.now();
     setShowHistory(false);
+    setActiveSkillPaths(DEFAULT_BUILTIN_SKILL_IDS.map(builtinFolderPath));
   }, []);
 
   // Stop generation
@@ -1022,7 +1026,19 @@ async function executeSkillWorkflow(
       message: log.message,
     }));
 
-    return JSON.stringify({ success: true, workflowId, variables: outputVars, logs });
+    // Extract saved files from successful note/file operations
+    const fileNodeTypes = new Set(["note", "file-save"]);
+    const savedFiles = result.context.logs
+      .filter(log => fileNodeTypes.has(log.nodeType) && log.status === "success" && typeof log.output === "string")
+      .map(log => log.output as string);
+
+    return JSON.stringify({
+      success: true,
+      workflowId,
+      variables: outputVars,
+      logs,
+      ...(savedFiles.length > 0 ? { savedFiles } : {}),
+    });
   } catch (e) {
     modal.setComplete(false);
     return JSON.stringify({ error: `Workflow execution failed: ${e instanceof Error ? e.message : String(e)}`, workflowId });

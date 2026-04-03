@@ -1,6 +1,8 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { Sparkles, X, Plus } from "lucide-react";
 import type { SkillMetadata } from "src/core/skillsLoader";
+import { isBuiltinSkillPath } from "src/core/builtinSkills";
 import { t } from "src/i18n";
 
 interface SkillSelectorProps {
@@ -17,27 +19,49 @@ export default function SkillSelector({
   disabled,
 }: SkillSelectorProps) {
   const [showDropdown, setShowDropdown] = useState(false);
+  const selectorRef = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Close dropdown on outside click
+  // Position dropdown above the selector, matching its full width
+  const updatePosition = useCallback(() => {
+    const dropdown = dropdownRef.current;
+    const selector = selectorRef.current;
+    if (!dropdown || !selector) return;
+    const rect = selector.getBoundingClientRect();
+    dropdown.style.left = `${rect.left}px`;
+    dropdown.style.width = `${rect.width}px`;
+    dropdown.style.bottom = `${window.innerHeight - rect.top + 4}px`;
+  }, []);
+
   useEffect(() => {
     if (!showDropdown) return;
+    // Close on outside click
     const handleClick = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+      if (
+        selectorRef.current && !selectorRef.current.contains(e.target as Node) &&
+        dropdownRef.current && !dropdownRef.current.contains(e.target as Node)
+      ) {
         setShowDropdown(false);
       }
     };
     document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [showDropdown]);
+    requestAnimationFrame(updatePosition);
+    window.addEventListener("resize", updatePosition);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      window.removeEventListener("resize", updatePosition);
+    };
+  }, [showDropdown, updatePosition]);
 
   const activeSkills = skills.filter(s => activeSkillPaths.includes(s.folderPath));
 
+  if (skills.length === 0) return null;
+
   return (
-    <div className="llm-hub-skill-selector">
+    <div className="llm-hub-skill-selector" ref={selectorRef}>
       <Sparkles size={14} className="llm-hub-skill-icon" />
       {activeSkills.map(skill => (
-        <span key={skill.folderPath} className="llm-hub-skill-chip">
+        <span key={skill.folderPath} className="llm-hub-skill-chip" title={skill.description}>
           {skill.name}
           <button
             className="llm-hub-skill-chip-remove"
@@ -48,44 +72,40 @@ export default function SkillSelector({
           </button>
         </span>
       ))}
-      <div className="llm-hub-skill-dropdown-wrapper" ref={dropdownRef}>
-        <button
-          className="llm-hub-skill-add-btn"
-          onClick={() => setShowDropdown(!showDropdown)}
-          disabled={disabled}
-          title={t("skills.add")}
-        >
-          <Plus size={12} />
-        </button>
-        {showDropdown && (
-          <div className="llm-hub-skill-dropdown">
-            {skills.length === 0 ? (
-              <div className="llm-hub-skill-dropdown-empty">
-                {t("skills.noSkills")}
+      <button
+        className="llm-hub-skill-add-btn"
+        onClick={() => setShowDropdown(!showDropdown)}
+        disabled={disabled}
+        title={t("skills.add")}
+      >
+        <Plus size={12} />
+      </button>
+      {showDropdown && createPortal(
+        <div className="llm-hub-skill-dropdown" ref={dropdownRef}>
+          {skills.map(skill => (
+            <label key={skill.folderPath} className="llm-hub-skill-dropdown-item">
+              <input
+                type="checkbox"
+                checked={activeSkillPaths.includes(skill.folderPath)}
+                onChange={() => onToggleSkill(skill.folderPath)}
+                disabled={disabled}
+              />
+              <div className="llm-hub-skill-dropdown-info">
+                <span className="llm-hub-skill-dropdown-name">
+                  {skill.name}
+                  {isBuiltinSkillPath(skill.folderPath) && (
+                    <span className="llm-hub-skill-builtin-badge">built-in</span>
+                  )}
+                </span>
+                {skill.description && (
+                  <span className="llm-hub-skill-dropdown-desc">{skill.description}</span>
+                )}
               </div>
-            ) : (
-              skills.map(skill => (
-                <label key={skill.folderPath} className="llm-hub-skill-dropdown-item">
-                  <input
-                    type="checkbox"
-                    checked={activeSkillPaths.includes(skill.folderPath)}
-                    onChange={() => {
-                      onToggleSkill(skill.folderPath);
-                    }}
-                    disabled={disabled}
-                  />
-                  <div className="llm-hub-skill-dropdown-info">
-                    <span className="llm-hub-skill-dropdown-name">{skill.name}</span>
-                    {skill.description && (
-                      <span className="llm-hub-skill-dropdown-desc">{skill.description}</span>
-                    )}
-                  </div>
-                </label>
-              ))
-            )}
-          </div>
-        )}
-      </div>
+            </label>
+          ))}
+        </div>,
+        document.body,
+      )}
     </div>
   );
 }

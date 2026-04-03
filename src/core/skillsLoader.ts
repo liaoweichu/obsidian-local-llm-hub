@@ -2,6 +2,7 @@ import { type App, TFile, TFolder, parseYaml } from "obsidian";
 import { parseWorkflowFromMarkdown } from "src/workflow/parser";
 import { SKILLS_FOLDER } from "src/types";
 import { ALL_EVENT_VARIABLE_NAMES } from "src/workflow/eventVariables";
+import { getBuiltinSkillMetadata, isBuiltinSkillPath, loadBuiltinSkill } from "./builtinSkills";
 
 export interface SkillWorkflowRef {
   path: string;            // relative path from skill folder (e.g. "workflows/lint.md")
@@ -24,14 +25,15 @@ export interface LoadedSkill extends SkillMetadata {
 }
 
 /**
- * Discover all skills in the skills folder.
+ * Discover all skills: built-in skills + vault skills.
  * Each subfolder containing a SKILL.md is treated as a skill.
  */
 export async function discoverSkills(app: App): Promise<SkillMetadata[]> {
-  const folder = app.vault.getAbstractFileByPath(SKILLS_FOLDER);
-  if (!(folder instanceof TFolder)) return [];
+  // Start with built-in skills
+  const skills: SkillMetadata[] = [...getBuiltinSkillMetadata()];
 
-  const skills: SkillMetadata[] = [];
+  const folder = app.vault.getAbstractFileByPath(SKILLS_FOLDER);
+  if (!(folder instanceof TFolder)) return skills;
 
   for (const child of folder.children) {
     if (!(child instanceof TFolder)) continue;
@@ -94,8 +96,16 @@ export async function discoverSkills(app: App): Promise<SkillMetadata[]> {
 
 /**
  * Load a skill's full content including references.
+ * Handles both built-in skills and vault-installed skills.
  */
 export async function loadSkill(app: App, metadata: SkillMetadata): Promise<LoadedSkill> {
+  // Handle built-in skills (no vault read needed)
+  if (isBuiltinSkillPath(metadata.folderPath)) {
+    const builtin = loadBuiltinSkill(metadata.folderPath);
+    if (builtin) return builtin;
+    return { ...metadata, instructions: "", references: [] };
+  }
+
   const skillFile = app.vault.getAbstractFileByPath(metadata.skillFilePath);
   if (!(skillFile instanceof TFile)) {
     return { ...metadata, instructions: "", references: [] };
