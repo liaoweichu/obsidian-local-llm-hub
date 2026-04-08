@@ -105,6 +105,18 @@ Connect local [MCP](https://modelcontextprotocol.io/) servers to extend the AI w
 
 Index your vault with a local embedding model (e.g. `nomic-embed-text`). Relevant notes are automatically included as context. Everything computed and stored locally.
 
+### RAG Search
+
+A dedicated search interface for semantic vector search with keyword filtering, chunk editing, and AI-powered refinement.
+
+![RAG Search](docs/images/rag-search.png)
+
+- **Keyword filter** — Narrow semantic search results by text or file path
+- **Chunk editor** — Edit result text, load adjacent chunks with automatic overlap removal
+- **AI refine** — Automatically expand context and clean up text using your local LLM
+
+See [RAG_SEARCH.md](docs/RAG_SEARCH.md) for details.
+
 ### Agent Skills
 
 Inject reusable instructions into the system prompt via `SKILL.md` files. Activate per conversation. Skills can also expose workflows that the AI can invoke as tools during chat.
