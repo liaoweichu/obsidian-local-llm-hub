@@ -4795,14 +4795,75 @@ body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) 
   margin-bottom: 8px;
 }
 
-.llm-hub-search-keyword-filter {
+.llm-hub-search-keyword-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   width: 100%;
+}
+
+.llm-hub-search-keyword-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.llm-hub-search-keyword-filter {
+  flex: 1;
   padding: 4px 8px;
   font-size: 12px;
   border: 1px solid var(--background-modifier-border);
   border-radius: 4px;
   background: var(--background-primary);
   color: var(--text-normal);
+}
+
+.llm-hub-search-keyword-ai-btn,
+.llm-hub-search-keyword-undo-btn,
+.llm-hub-search-keyword-remove-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: var(--background-primary);
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.llm-hub-search-keyword-ai-btn:hover:not(:disabled),
+.llm-hub-search-keyword-undo-btn:hover,
+.llm-hub-search-keyword-remove-btn:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+.llm-hub-search-keyword-ai-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.llm-hub-search-keyword-add-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.llm-hub-search-keyword-add-btn:hover {
+  color: var(--text-normal);
+  border-color: var(--text-muted);
 }
 
 .llm-hub-search-results-actions {

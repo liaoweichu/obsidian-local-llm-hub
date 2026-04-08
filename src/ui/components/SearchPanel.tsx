@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Search, MessageSquare, FileText, ChevronDown, Loader2, Settings2, RefreshCw, Pencil } from "lucide-react";
+import { Search, MessageSquare, FileText, ChevronDown, Loader2, Settings2, RefreshCw, Pencil, Plus, Undo2, X, Sparkles } from "lucide-react";
 import { Notice } from "obsidian";
 import { RagChunkEditModal } from "./RagChunkEditModal";
 import type { LocalLlmHubPlugin } from "src/plugin";
-import type { Attachment } from "src/types";
+import type { Attachment, Message } from "src/types";
 import { DEFAULT_RAG_SETTING } from "src/types";
 import { getRagStore, type RagSearchResult } from "src/core/ragStore";
+import { localLlmChatStream } from "src/core/localLlmProvider";
 import { t } from "src/i18n";
 
 interface SearchPanelProps {
@@ -22,7 +23,13 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
   const [results, setResults] = useState<RagSearchResult[]>([]);
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
   const [expandedIndices, setExpandedIndices] = useState<Set<number>>(new Set());
-  const [keywordFilter, setKeywordFilter] = useState("");
+  const filterIdCounter = useRef(1);
+  const [keywordFilters, setKeywordFilters] = useState<{ id: number; value: string }[]>(
+    () => [{ id: 0, value: "" }]
+  );
+  const [aiSuggestingId, setAiSuggestingId] = useState<number | null>(null);
+  const [aiPrevValues, setAiPrevValues] = useState<Map<number, string>>(new Map());
+  const aiAbortRef = useRef<AbortController | null>(null);
   const [editedIndices, setEditedIndices] = useState<Set<number>>(new Set());
   const [refinedIndices, setRefinedIndices] = useState<Set<number>>(new Set());
   const [chunkBoundaries, setChunkBoundaries] = useState<Map<number, { first: string; last: string }>>(new Map());
@@ -77,6 +84,13 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
   // Check if current setting is internal (not external index)
   const currentRagSetting = plugin.getRagSetting(selectedRagSetting);
   const isInternalRag = currentRagSetting ? !currentRagSetting.externalIndexPath : false;
+
+  // Abort AI suggestions on unmount
+  useEffect(() => {
+    return () => {
+      aiAbortRef.current?.abort();
+    };
+  }, []);
 
   useEffect(() => {
     const syncRagSettings = () => {
@@ -247,7 +261,9 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
     setResults([]);
     setSelectedIndices(new Set());
     setExpandedIndices(new Set());
-    setKeywordFilter("");
+    aiAbortRef.current?.abort();
+    setKeywordFilters([{ id: filterIdCounter.current++, value: "" }]);
+    setAiPrevValues(new Map());
     setEditedIndices(new Set());
     setRefinedIndices(new Set());
     setChunkBoundaries(new Map());
@@ -294,15 +310,19 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
     });
   };
 
-  // Filtered results: pairs of [originalIndex, result] matching the keyword filter
+  // Filtered results: pairs of [originalIndex, result] matching the keyword filters.
+  // Each field: space-separated OR (any term matches). Between fields: AND (all fields must match).
   const filteredResults: [number, RagSearchResult][] = (() => {
-    if (!keywordFilter.trim()) return results.map((r, i) => [i, r] as [number, RagSearchResult]);
-    const terms = keywordFilter.toLowerCase().split(/\s+/).filter(t => t.length > 0);
+    const activeFilters = keywordFilters
+      .map(f => f.value.toLowerCase().split(/\s+/).filter(t => t.length > 0))
+      .filter(terms => terms.length > 0);
+    if (activeFilters.length === 0) return results.map((r, i) => [i, r] as [number, RagSearchResult]);
     return results
       .map((r, i) => [i, r] as [number, RagSearchResult])
       .filter(([, r]) => {
         const text = (r.text + " " + r.filePath).toLowerCase();
-        return terms.every(term => text.includes(term));
+        // AND across fields: every field must have at least one matching term (OR within field)
+        return activeFilters.every(terms => terms.some(term => text.includes(term)));
       });
   })();
 
@@ -349,6 +369,70 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
   const handleChatWithSelected = () => {
     const attachments = buildSelectedAttachments();
     if (attachments) onChatWithResults(attachments);
+  };
+
+  const handleAiSuggest = async (filterId: number) => {
+    const filter = keywordFilters.find(f => f.id === filterId);
+    const currentTerms = filter?.value.trim();
+    if (!currentTerms || !refineModel) return;
+
+    // Abort any previous AI suggestion
+    aiAbortRef.current?.abort();
+    const abortController = new AbortController();
+    aiAbortRef.current = abortController;
+
+    // Save current value for undo
+    setAiPrevValues(prev => new Map(prev).set(filterId, currentTerms));
+    setAiSuggestingId(filterId);
+    try {
+      const systemPrompt = [
+        "You are a keyword expansion assistant.",
+        "Given the user's search keywords, suggest additional synonyms, related terms, and alternate phrasings that would help find similar content.",
+        "Return ONLY a space-separated list of suggested keywords (no numbering, no explanations, no punctuation except hyphens within compound words).",
+        "Include the original keywords in your response.",
+        "Keep the total number of terms between 5 and 15.",
+        "Respond in the same language as the input keywords.",
+      ].join(" ");
+      const messages: Message[] = [{ role: "user", content: currentTerms, timestamp: Date.now() }];
+      const llmConfig = { ...plugin.settings.llmConfig, model: refineModel };
+      let result = "";
+      for await (const chunk of localLlmChatStream(
+        llmConfig,
+        messages,
+        systemPrompt,
+        abortController.signal,
+      )) {
+        if (abortController.signal.aborted) return;
+        if (chunk.type === "error") {
+          throw new Error(chunk.error ?? chunk.content ?? "Unknown error");
+        }
+        if (chunk.type === "text" && chunk.content) result += chunk.content;
+      }
+      const suggested = result.trim();
+      if (suggested && !abortController.signal.aborted) {
+        setKeywordFilters(prev => prev.map(f => f.id === filterId ? { ...f, value: suggested } : f));
+      }
+    } catch (err) {
+      if (!abortController.signal.aborted) {
+        new Notice(t("search.aiSuggestFailed") + ": " + (err instanceof Error ? err.message : String(err)));
+      }
+    } finally {
+      if (aiAbortRef.current === abortController) {
+        aiAbortRef.current = null;
+      }
+      setAiSuggestingId(prev => prev === filterId ? null : prev);
+    }
+  };
+
+  const handleAiUndo = (filterId: number) => {
+    const prevValue = aiPrevValues.get(filterId);
+    if (prevValue === undefined) return;
+    setKeywordFilters(prev => prev.map(f => f.id === filterId ? { ...f, value: prevValue } : f));
+    setAiPrevValues(prev => {
+      const next = new Map(prev);
+      next.delete(filterId);
+      return next;
+    });
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -538,9 +622,9 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
             <input
               type="number"
               min={1}
-              max={50}
+              max={200}
               value={topK}
-              onChange={e => setTopK(Math.max(1, Math.min(50, parseInt(e.target.value) || 5)))}
+              onChange={e => setTopK(Math.max(1, Math.min(200, parseInt(e.target.value) || 5)))}
               className="llm-hub-search-param-input"
             />
           </label>
@@ -589,14 +673,61 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
         {results.length > 0 && (
           <>
             <div className="llm-hub-search-results-header">
-              <input
-                className="llm-hub-search-keyword-filter"
-                type="text"
-                placeholder={t("search.keywordFilter")}
-                value={keywordFilter}
-                onChange={e => setKeywordFilter(e.target.value)}
-                onClick={e => e.stopPropagation()}
-              />
+              <div className="llm-hub-search-keyword-filters">
+                {keywordFilters.map((filter) => (
+                  <div key={filter.id} className="llm-hub-search-keyword-filter-row">
+                    <input
+                      className="llm-hub-search-keyword-filter"
+                      type="text"
+                      placeholder={t("search.keywordFilterOr")}
+                      value={filter.value}
+                      onChange={e => {
+                        const val = e.target.value;
+                        setKeywordFilters(prev => prev.map(f => f.id === filter.id ? { ...f, value: val } : f));
+                      }}
+                      onClick={e => e.stopPropagation()}
+                    />
+                    {aiPrevValues.has(filter.id) && aiSuggestingId !== filter.id && (
+                      <button
+                        className="llm-hub-search-keyword-undo-btn"
+                        title={t("search.aiUndo")}
+                        onClick={() => handleAiUndo(filter.id)}
+                      >
+                        <Undo2 size={14} />
+                      </button>
+                    )}
+                    <button
+                      className="llm-hub-search-keyword-ai-btn"
+                      title={t("search.aiSuggest")}
+                      disabled={!filter.value.trim() || !refineModel || aiSuggestingId === filter.id}
+                      onClick={() => void handleAiSuggest(filter.id)}
+                    >
+                      {aiSuggestingId === filter.id
+                        ? <Loader2 size={14} className="llm-hub-spinner" />
+                        : <Sparkles size={14} />}
+                    </button>
+                    {keywordFilters.length > 1 && (
+                      <button
+                        className="llm-hub-search-keyword-remove-btn"
+                        title={t("search.removeFilter")}
+                        onClick={() => {
+                          setKeywordFilters(prev => prev.filter(f => f.id !== filter.id));
+                        }}
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <button
+                  className="llm-hub-search-keyword-add-btn"
+                  title={t("search.addFilter")}
+                  onClick={() => setKeywordFilters(prev => [...prev, { id: filterIdCounter.current++, value: "" }])}
+                >
+                  <Plus size={14} />
+                  {t("search.addFilterLabel")}
+                </button>
+              </div>
               <div className="llm-hub-search-results-actions">
                 <label className="llm-hub-search-select-all">
                   <input

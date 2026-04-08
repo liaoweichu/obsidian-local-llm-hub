@@ -14,12 +14,26 @@ Results are ranked by cosine similarity between the query embedding and each ind
 
 ## Keyword Filter
 
-After a semantic search, use the keyword filter input at the top of the results list to narrow down results by keyword.
+After a semantic search, use the keyword filter at the top of the results list to narrow down results. Multiple filter fields can be combined for precise filtering.
 
-- Space-separated terms — all terms must match (AND logic)
+- **Within a field** — Space-separated terms use **OR** logic (any term matches)
+- **Between fields** — Multiple fields use **AND** logic (all fields must match)
+- Click the **+ AND** button to add another filter field
+- Click **✕** to remove a filter field
 - Matches against both chunk text and file path
 - The "Select all" checkbox and count reflect the filtered view
-- Clear the filter to see all results again
+- Clear all filters to see all results again
+
+### AI Keyword Suggestion
+
+Each filter field has an **✦** (sparkle) button that uses AI to expand your keywords with synonyms and related terms.
+
+- Enter one or more keywords, then click ✦
+- The configured **AI Refine Model** generates related terms and replaces the field content
+- Click the **↩** (undo) button to restore the original keywords
+- Requires a model to be selected in **AI Refine Model** (search settings gear icon)
+
+This is useful for catching variations in terminology that embedding similarity may have missed, while still filtering within the already-retrieved results.
 
 ## Selecting Results
 
