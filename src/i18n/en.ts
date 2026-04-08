@@ -759,6 +759,17 @@ export const en = {
   "search.results": "Results",
   "search.chatWithSelected": "Chat with selected",
   "search.selectResults": "Please select at least one result",
+  "search.selected": "Selected",
+  "search.editChunk": "Edit chunk",
+  "search.loadPrevChunk": "Load previous chunk",
+  "search.loadNextChunk": "Load next chunk",
+  "search.keywordFilter": "Filter by keyword...",
+  "search.refineWithAI": "Refine with AI",
+  "search.refining": "Refining...",
+  "search.refineModel": "AI refine model",
+  "search.refineModelNone": "None (AI refine disabled)",
+  "search.refineModelRequired": "Select a model in search settings to enable AI refine",
+  "search.edited": "Edited",
   "search.scoreThreshold": "Min score",
 
   // RAG source modal

@@ -755,6 +755,17 @@ export const ja: Record<string, string> = {
   "search.results": "件",
   "search.chatWithSelected": "選択してチャット",
   "search.selectResults": "少なくとも1つの結果を選択してください",
+  "search.selected": "選択中",
+  "search.editChunk": "チャンクを編集",
+  "search.loadPrevChunk": "前のチャンクを読み込む",
+  "search.loadNextChunk": "次のチャンクを読み込む",
+  "search.keywordFilter": "キーワードで絞り込み...",
+  "search.refineWithAI": "AIで整形",
+  "search.refining": "整形中...",
+  "search.refineModel": "AI整形モデル",
+  "search.refineModelNone": "なし（AI整形無効）",
+  "search.refineModelRequired": "AI整形を有効にするには検索設定でモデルを選択してください",
+  "search.edited": "編集済み",
   "search.scoreThreshold": "最低スコア",
 
   // RAG source modal

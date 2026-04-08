@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Search, MessageSquare, FileText, ChevronDown, Loader2, Settings2, RefreshCw } from "lucide-react";
+import { Search, MessageSquare, FileText, ChevronDown, Loader2, Settings2, RefreshCw, Pencil } from "lucide-react";
 import { Notice } from "obsidian";
+import { RagChunkEditModal } from "./RagChunkEditModal";
 import type { LocalLlmHubPlugin } from "src/plugin";
 import type { Attachment } from "src/types";
 import { DEFAULT_RAG_SETTING } from "src/types";
@@ -21,6 +22,11 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
   const [results, setResults] = useState<RagSearchResult[]>([]);
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
   const [expandedIndices, setExpandedIndices] = useState<Set<number>>(new Set());
+  const [keywordFilter, setKeywordFilter] = useState("");
+  const [editedIndices, setEditedIndices] = useState<Set<number>>(new Set());
+  const [refinedIndices, setRefinedIndices] = useState<Set<number>>(new Set());
+  const [chunkBoundaries, setChunkBoundaries] = useState<Map<number, { first: string; last: string }>>(new Map());
+  const [refineModel, setRefineModel] = useState("");
   const [isSearching, setIsSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [topK, setTopK] = useState(() => {
@@ -241,6 +247,10 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
     setResults([]);
     setSelectedIndices(new Set());
     setExpandedIndices(new Set());
+    setKeywordFilter("");
+    setEditedIndices(new Set());
+    setRefinedIndices(new Set());
+    setChunkBoundaries(new Map());
 
     try {
       const overriddenSetting = { ...ragSetting, topK, minScore: scoreThreshold };
@@ -284,18 +294,36 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
     });
   };
 
+  // Filtered results: pairs of [originalIndex, result] matching the keyword filter
+  const filteredResults: [number, RagSearchResult][] = (() => {
+    if (!keywordFilter.trim()) return results.map((r, i) => [i, r] as [number, RagSearchResult]);
+    const terms = keywordFilter.toLowerCase().split(/\s+/).filter(t => t.length > 0);
+    return results
+      .map((r, i) => [i, r] as [number, RagSearchResult])
+      .filter(([, r]) => {
+        const text = (r.text + " " + r.filePath).toLowerCase();
+        return terms.every(term => text.includes(term));
+      });
+  })();
+
   const toggleSelectAll = () => {
-    if (selectedIndices.size === results.length) {
-      setSelectedIndices(new Set());
+    const filteredIndices = new Set(filteredResults.map(([i]) => i));
+    const allFilteredSelected = filteredResults.length > 0 && filteredResults.every(([i]) => selectedIndices.has(i));
+    if (allFilteredSelected) {
+      setSelectedIndices(prev => {
+        const next = new Set(prev);
+        for (const i of filteredIndices) next.delete(i);
+        return next;
+      });
     } else {
-      setSelectedIndices(new Set(results.map((_, i) => i)));
+      setSelectedIndices(prev => new Set([...prev, ...filteredIndices]));
     }
   };
 
-  const handleChatWithSelected = () => {
+  const buildSelectedAttachments = (): Attachment[] | null => {
     if (selectedIndices.size === 0) {
       new Notice(t("search.selectResults"));
-      return;
+      return null;
     }
 
     const attachments: Attachment[] = [];
@@ -315,7 +343,12 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
       });
     }
 
-    onChatWithResults(attachments);
+    return attachments;
+  };
+
+  const handleChatWithSelected = () => {
+    const attachments = buildSelectedAttachments();
+    if (attachments) onChatWithResults(attachments);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -464,6 +497,19 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
                 </div>
               )}
             </div>
+            <div className="llm-hub-rag-config-row">
+              <label>{t("search.refineModel")}</label>
+              <select
+                className="llm-hub-rag-config-select"
+                value={refineModel}
+                onChange={e => setRefineModel(e.target.value)}
+              >
+                <option value="">{t("search.refineModelNone")}</option>
+                {plugin.settings.availableModels.map(m => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+            </div>
             <div className="llm-hub-rag-config-actions">
               {isInternalRag && (
                 <button
@@ -543,27 +589,40 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
         {results.length > 0 && (
           <>
             <div className="llm-hub-search-results-header">
-              <label className="llm-hub-search-select-all">
-                <input
-                  type="checkbox"
-                  checked={selectedIndices.size === results.length}
-                  onChange={toggleSelectAll}
-                />
-                {t("search.selectAll")} ({results.length} {t("search.results")})
-              </label>
-              <button
-                className="llm-hub-search-chat-btn"
-                onClick={handleChatWithSelected}
-                disabled={selectedIndices.size === 0}
-              >
-                <MessageSquare size={14} />
-                {t("search.chatWithSelected")} ({selectedIndices.size})
-              </button>
+              <input
+                className="llm-hub-search-keyword-filter"
+                type="text"
+                placeholder={t("search.keywordFilter")}
+                value={keywordFilter}
+                onChange={e => setKeywordFilter(e.target.value)}
+                onClick={e => e.stopPropagation()}
+              />
+              <div className="llm-hub-search-results-actions">
+                <label className="llm-hub-search-select-all">
+                  <input
+                    type="checkbox"
+                    checked={filteredResults.length > 0 && filteredResults.every(([i]) => selectedIndices.has(i))}
+                    onChange={toggleSelectAll}
+                  />
+                  {t("search.selectAll")} ({filteredResults.length}/{results.length} {t("search.results")})
+                </label>
+                <span className="llm-hub-search-selected-count">
+                  {t("search.selected")}: {selectedIndices.size}
+                </span>
+                <button
+                  className="llm-hub-search-chat-btn"
+                  onClick={handleChatWithSelected}
+                  disabled={selectedIndices.size === 0}
+                >
+                  <MessageSquare size={14} />
+                  Chat
+                </button>
+              </div>
             </div>
-            {results.map((result, index) => (
+            {filteredResults.map(([index, result]) => (
               <div
                 key={`${result.filePath}-${index}`}
-                className={`llm-hub-search-result-item ${selectedIndices.has(index) ? "selected" : ""}`}
+                className={`llm-hub-search-result-item ${selectedIndices.has(index) ? "selected" : ""} ${editedIndices.has(index) ? "edited" : ""}`}
                 onClick={() => toggleSelection(index)}
               >
                 <div className="llm-hub-search-result-header">
@@ -592,6 +651,9 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
                   <span className="llm-hub-search-result-score">
                     {(result.score * 100).toFixed(1)}%
                   </span>
+                  {editedIndices.has(index) && (
+                    <span className="llm-hub-search-result-edited-badge">{t("search.edited")}</span>
+                  )}
                 </div>
                 <div
                   className={`llm-hub-search-result-preview ${expandedIndices.has(index) ? "expanded" : ""}`}
@@ -601,14 +663,42 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
                     result.text.length > 300 ? result.text.slice(0, 300) + "..." : result.text
                   )}
                 </div>
-                {result.text.length > 300 && (
-                  <button
-                    className="llm-hub-search-result-toggle"
-                    onClick={e => { e.stopPropagation(); toggleExpanded(index); }}
-                  >
-                    <ChevronDown size={14} className={expandedIndices.has(index) ? "llm-hub-chevron-rotated" : ""} />
-                  </button>
-                )}
+                <div className="llm-hub-search-result-actions">
+                  {expandedIndices.has(index) && (
+                    <button
+                      className="llm-hub-search-result-edit-btn clickable-icon"
+                      onClick={e => {
+                        e.stopPropagation();
+                        const llmConfig = refineModel
+                          ? { ...plugin.settings.llmConfig, model: refineModel }
+                          : plugin.settings.llmConfig;
+                        new RagChunkEditModal(plugin.app, result, selectedRagSetting, query, llmConfig, refinedIndices.has(index), (edited) => {
+                          setResults(prev => {
+                            const next = [...prev];
+                            next[index] = { ...prev[index], text: edited.text };
+                            return next;
+                          });
+                          setEditedIndices(prev => new Set(prev).add(index));
+                          setChunkBoundaries(prev => new Map(prev).set(index, { first: edited.firstChunkText, last: edited.lastChunkText }));
+                          if (edited.refined) {
+                            setRefinedIndices(prev => new Set(prev).add(index));
+                          }
+                        }, chunkBoundaries.get(index)).open();
+                      }}
+                      title={t("search.editChunk")}
+                    >
+                      <Pencil size={14} />
+                    </button>
+                  )}
+                  {result.text.length > 300 && (
+                    <button
+                      className="llm-hub-search-result-toggle"
+                      onClick={e => { e.stopPropagation(); toggleExpanded(index); }}
+                    >
+                      <ChevronDown size={14} className={expandedIndices.has(index) ? "llm-hub-chevron-rotated" : ""} />
+                    </button>
+                  )}
+                </div>
               </div>
             ))}
           </>

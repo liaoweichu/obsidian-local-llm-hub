@@ -431,6 +431,76 @@ class RagStore {
       .sort((a, b) => a.filePath.localeCompare(b.filePath));
   }
 
+  /** Keyword search across indexed chunks (no embedding API call needed). */
+  async keywordSearch(
+    app: App, settingName: string, query: string, topK: number,
+  ): Promise<RagSearchResult[]> {
+    const entry = await this.ensureLoaded(app, settingName);
+    if (!entry.index) return [];
+
+    const terms = query.toLowerCase().split(/\s+/).filter(t => t.length > 0);
+    if (terms.length === 0) return [];
+
+    const scored: { index: number; score: number }[] = [];
+
+    for (let i = 0; i < entry.index.meta.length; i++) {
+      const meta = entry.index.meta[i];
+      const textLower = meta.text.toLowerCase();
+      let matchCount = 0;
+      let totalOccurrences = 0;
+      for (const term of terms) {
+        let pos = 0;
+        let found = false;
+        while (true) {
+          const idx = textLower.indexOf(term, pos);
+          if (idx === -1) break;
+          found = true;
+          totalOccurrences++;
+          pos = idx + term.length;
+        }
+        if (found) matchCount++;
+      }
+
+      if (matchCount === 0) continue;
+
+      const termCoverage = matchCount / terms.length;
+      const density = totalOccurrences / (textLower.length / 100);
+      scored.push({ index: i, score: termCoverage * 0.7 + Math.min(density, 1) * 0.3 });
+    }
+
+    scored.sort((a, b) => b.score - a.score);
+    return scored.slice(0, topK).map(r => ({
+      filePath: entry.index!.meta[r.index].filePath,
+      text: entry.index!.meta[r.index].text,
+      score: r.score,
+    }));
+  }
+
+  /** Get an adjacent chunk (prev/next) for a given file.
+   *  Uses text matching to identify the current chunk. */
+  async getAdjacentChunk(
+    app: App, settingName: string, filePath: string, chunkText: string, direction: "prev" | "next",
+  ): Promise<RagSearchResult | null> {
+    const entry = await this.ensureLoaded(app, settingName);
+    if (!entry.index) return null;
+
+    const fileChunks: { meta: ChunkMeta; metaIndex: number }[] = [];
+    for (let i = 0; i < entry.index.meta.length; i++) {
+      if (entry.index.meta[i].filePath === filePath) {
+        fileChunks.push({ meta: entry.index.meta[i], metaIndex: i });
+      }
+    }
+
+    const currentPos = fileChunks.findIndex(c => c.meta.text === chunkText);
+    if (currentPos === -1) return null;
+
+    const targetPos = direction === "prev" ? currentPos - 1 : currentPos + 1;
+    if (targetPos < 0 || targetPos >= fileChunks.length) return null;
+
+    const meta = fileChunks[targetPos].meta;
+    return { filePath: meta.filePath, text: meta.text, score: 0 };
+  }
+
   /**
    * Clear the entire RAG index for a named setting
    */
