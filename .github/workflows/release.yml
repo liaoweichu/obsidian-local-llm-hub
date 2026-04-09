@@ -41,6 +41,20 @@ jobs:
         if: steps.check_tag.outputs.exists == 'false'
         run: npm ci
 
+      - name: Validate manifest.json version
+        if: steps.check_tag.outputs.exists == 'false'
+        run: |
+          MANIFEST_VERSION=$(node -p "require('./manifest.json').version || ''")
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          if [ -z "$MANIFEST_VERSION" ]; then
+            echo "::error::manifest.json is missing the 'version' field"
+            exit 1
+          fi
+          if [ "$MANIFEST_VERSION" != "$PACKAGE_VERSION" ]; then
+            echo "::error::manifest.json version ($MANIFEST_VERSION) does not match package.json version ($PACKAGE_VERSION)"
+            exit 1
+          fi
+
       - name: Build
         if: steps.check_tag.outputs.exists == 'false'
         run: npm run build
