@@ -780,9 +780,9 @@ export const en = {
   "search.refineModelRequired": "Select a model in search settings to enable AI refine",
   "search.edited": "Edited",
   "search.fileExtensions": "Ext",
-  "search.fileExtensionsPlaceholder": "md, pdf",
-  "search.pdfMode.text": "as Text",
-  "search.pdfMode.pdf": "as PDF",
+  "search.fileExtensionsPlaceholder": "Ext filter",
+  "search.pdfMode.text": "As text",
+  "search.pdfMode.pdf": "As PDF",
   "search.pdfPreviewFailed": "PDF preview failed",
   "search.scoreThreshold": "Min score",
 

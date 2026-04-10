@@ -776,7 +776,7 @@ export const ja: Record<string, string> = {
   "search.refineModelRequired": "AI整形を有効にするには検索設定でモデルを選択してください",
   "search.edited": "編集済み",
   "search.fileExtensions": "Ext",
-  "search.fileExtensionsPlaceholder": "md, pdf",
+  "search.fileExtensionsPlaceholder": "拡張子フィルター",
   "search.pdfMode.text": "text表示",
   "search.pdfMode.pdf": "PDF表示",
   "search.pdfPreviewFailed": "PDFプレビューに失敗しました",
