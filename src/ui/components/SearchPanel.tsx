@@ -7,6 +7,7 @@ import type { Attachment, Message } from "src/types";
 import { DEFAULT_RAG_SETTING } from "src/types";
 import { getRagStore, type RagSearchResult } from "src/core/ragStore";
 import { localLlmChatStream } from "src/core/localLlmProvider";
+import { parseFilterTerms, matchesFilter, removeRedundantTerms } from "./searchUtils";
 import { t } from "src/i18n";
 
 interface SearchPanelProps {
@@ -311,18 +312,17 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
   };
 
   // Filtered results: pairs of [originalIndex, result] matching the keyword filters.
-  // Each field: space-separated OR (any term matches). Between fields: AND (all fields must match).
+  // Each field: space-separated OR (any term matches), quoted phrases match as-is. Between fields: AND.
   const filteredResults: [number, RagSearchResult][] = (() => {
     const activeFilters = keywordFilters
-      .map(f => f.value.toLowerCase().split(/\s+/).filter(t => t.length > 0))
+      .map(f => parseFilterTerms(f.value))
       .filter(terms => terms.length > 0);
     if (activeFilters.length === 0) return results.map((r, i) => [i, r] as [number, RagSearchResult]);
     return results
       .map((r, i) => [i, r] as [number, RagSearchResult])
       .filter(([, r]) => {
-        const text = (r.text + " " + r.filePath).toLowerCase();
-        // AND across fields: every field must have at least one matching term (OR within field)
-        return activeFilters.every(terms => terms.some(term => text.includes(term)));
+        const rawText = r.text + " " + r.filePath;
+        return activeFilters.every(terms => matchesFilter(rawText, terms));
       });
   })();
 
@@ -390,8 +390,8 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
         "Given the user's search keywords, suggest additional synonyms, related terms, and alternate phrasings that would help find similar content.",
         "Return ONLY a space-separated list of suggested keywords (no numbering, no explanations, no punctuation except hyphens within compound words).",
         "Include the original keywords in your response.",
+        "If the input is not in English, also include English translations and related English terms.",
         "Keep the total number of terms between 5 and 15.",
-        "Respond in the same language as the input keywords.",
       ].join(" ");
       const messages: Message[] = [{ role: "user", content: currentTerms, timestamp: Date.now() }];
       const llmConfig = { ...plugin.settings.llmConfig, model: refineModel };
@@ -410,7 +410,8 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
       }
       const suggested = result.trim();
       if (suggested && !abortController.signal.aborted) {
-        setKeywordFilters(prev => prev.map(f => f.id === filterId ? { ...f, value: suggested } : f));
+        const value = removeRedundantTerms(suggested, currentTerms);
+        setKeywordFilters(prev => prev.map(f => f.id === filterId ? { ...f, value } : f));
       }
     } catch (err) {
       if (!abortController.signal.aborted) {
@@ -622,9 +623,9 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
             <input
               type="number"
               min={1}
-              max={200}
+              max={999}
               value={topK}
-              onChange={e => setTopK(Math.max(1, Math.min(200, parseInt(e.target.value) || 5)))}
+              onChange={e => setTopK(Math.max(1, Math.min(999, parseInt(e.target.value) || 5)))}
               className="llm-hub-search-param-input"
             />
           </label>
