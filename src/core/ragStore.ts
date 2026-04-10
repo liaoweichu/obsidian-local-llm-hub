@@ -717,11 +717,14 @@ async function extractPdfText(app: App, file: TFile): Promise<PdfExtractResult |
   const pageOffsets: number[] = [];
   let offset = 0;
   for (let i = 0; i < pageTexts.length; i++) {
-    pageOffsets.push(offset);
     if (pageTexts[i]) {
       if (parts.length > 0) offset++; // for "\n" separator
+      pageOffsets.push(offset);
       parts.push(pageTexts[i]);
       offset += pageTexts[i].length;
+    } else {
+      // Empty page: point to where next text will start
+      pageOffsets.push(offset);
     }
   }
   if (parts.length === 0) return null;
