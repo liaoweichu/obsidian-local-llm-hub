@@ -5,8 +5,9 @@ import { RagChunkEditModal } from "./RagChunkEditModal";
 import type { LocalLlmHubPlugin } from "src/plugin";
 import type { Attachment, Message } from "src/types";
 import { DEFAULT_RAG_SETTING } from "src/types";
-import { getRagStore, type RagSearchResult } from "src/core/ragStore";
+import { getRagStore, type RagSearchResult, type RagSyncProgress } from "src/core/ragStore";
 import { localLlmChatStream } from "src/core/localLlmProvider";
+import { extractPdfPages } from "src/core/pdfUtils";
 import { parseFilterTerms, matchesFilter, removeRedundantTerms } from "./searchUtils";
 import { t } from "src/i18n";
 
@@ -24,6 +25,10 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
   const [results, setResults] = useState<RagSearchResult[]>([]);
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
   const [expandedIndices, setExpandedIndices] = useState<Set<number>>(new Set());
+  const [mediaPreviews, setMediaPreviews] = useState<Map<number, string>>(new Map());
+  const mediaPreviewsRef = useRef(mediaPreviews);
+  mediaPreviewsRef.current = mediaPreviews;
+  const [pdfModes, setPdfModes] = useState<Map<number, "text" | "pdf">>(new Map());
   const filterIdCounter = useRef(1);
   const [keywordFilters, setKeywordFilters] = useState<{ id: number; value: string }[]>(
     () => [{ id: 0, value: "" }]
@@ -49,6 +54,7 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
     );
     return setting?.minScore ?? DEFAULT_RAG_SETTING.minScore;
   });
+  const [searchFileExtensions, setSearchFileExtensions] = useState("");
 
   // RAG settings section state
   const [showRagConfig, setShowRagConfig] = useState(false);
@@ -79,6 +85,7 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
   const [ragSyncing, setRagSyncing] = useState(false);
   const ragSyncCancelRef = useRef(false);
   const ragSyncAbortRef = useRef<AbortController | null>(null);
+  const [ragSyncProgress, setRagSyncProgress] = useState<RagSyncProgress | null>(null);
   const [indexedFiles, setIndexedFiles] = useState<{ filePath: string; chunks: number }[]>([]);
   const [showIndexedFiles, setShowIndexedFiles] = useState(false);
 
@@ -90,6 +97,7 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
   useEffect(() => {
     return () => {
       aiAbortRef.current?.abort();
+      mediaPreviewsRef.current.forEach(url => URL.revokeObjectURL(url));
     };
   }, []);
 
@@ -204,6 +212,7 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
     if (!ragSetting) return;
 
     setRagSyncing(true);
+    setRagSyncProgress(null);
     ragSyncCancelRef.current = false;
     const abortController = new AbortController();
     ragSyncAbortRef.current = abortController;
@@ -216,6 +225,12 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
         ragSetting,
         plugin.settings.llmConfig,
         abortController.signal,
+        (progress) => {
+          if (ragSyncCancelRef.current) {
+            throw new Error("Sync aborted");
+          }
+          setRagSyncProgress(progress);
+        },
       );
       if (!ragSyncCancelRef.current) {
         new Notice(t("settings.ragSynced", {
@@ -234,6 +249,7 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
       new Notice(t("settings.ragSyncFailed", { error: msg }));
     } finally {
       setRagSyncing(false);
+      setRagSyncProgress(null);
       ragSyncCancelRef.current = false;
       ragSyncAbortRef.current = null;
     }
@@ -262,6 +278,9 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
     setResults([]);
     setSelectedIndices(new Set());
     setExpandedIndices(new Set());
+    mediaPreviews.forEach(url => URL.revokeObjectURL(url));
+    setMediaPreviews(new Map());
+    setPdfModes(new Map());
     aiAbortRef.current?.abort();
     setKeywordFilters([{ id: filterIdCounter.current++, value: "" }]);
     setAiPrevValues(new Map());
@@ -271,12 +290,17 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
 
     try {
       const overriddenSetting = { ...ragSetting, topK, minScore: scoreThreshold };
+      const extensions = searchFileExtensions
+        .split(",")
+        .map(ext => ext.trim())
+        .filter(ext => ext.length > 0);
       const searchResults = await store.search(
         selectedRagSetting,
         query.trim(),
         overriddenSetting,
         plugin.settings.llmConfig,
         plugin.app,
+        extensions,
       );
       setResults(searchResults);
     } catch (err) {
@@ -299,6 +323,32 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
     });
   };
 
+  const parsePdfStartPage = (pageLabel?: string): number | null => {
+    if (!pageLabel) return null;
+    const match = pageLabel.match(/^pages?\s+(\d+)/i);
+    return match ? Number(match[1]) : null;
+  };
+
+  const loadPdfPreview = useCallback((index: number, result: RagSearchResult) => {
+    if (result.contentType !== "pdf" || mediaPreviews.has(index)) return;
+
+    void (async () => {
+      try {
+        const pdfBuffer = result.pageLabel
+          ? await extractPdfPages(plugin.app, result.filePath, result.pageLabel)
+          : null;
+        if (!pdfBuffer) {
+          throw new Error("Failed to extract PDF pages");
+        }
+        const blob = new Blob([pdfBuffer], { type: "application/pdf" });
+        const url = URL.createObjectURL(blob);
+        setMediaPreviews(prev => new Map(prev).set(index, url));
+      } catch (err) {
+        new Notice(t("search.pdfPreviewFailed") + ": " + (err instanceof Error ? err.message : String(err)));
+      }
+    })();
+  }, [mediaPreviews, plugin.app]);
+
   const toggleSelection = (index: number) => {
     setSelectedIndices(prev => {
       const next = new Set(prev);
@@ -317,10 +367,10 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
     const activeFilters = keywordFilters
       .map(f => parseFilterTerms(f.value))
       .filter(terms => terms.length > 0);
-    if (activeFilters.length === 0) return results.map((r, i) => [i, r] as [number, RagSearchResult]);
     return results
       .map((r, i) => [i, r] as [number, RagSearchResult])
       .filter(([, r]) => {
+        if (activeFilters.length === 0) return true;
         const rawText = r.text + " " + r.filePath;
         return activeFilters.every(terms => matchesFilter(rawText, terms));
       });
@@ -582,6 +632,17 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
                 </div>
               )}
             </div>
+            {isInternalRag && ragSyncProgress && (
+              <div className="llm-hub-rag-sync-progress-bar">
+                <progress
+                  value={ragSyncProgress.current}
+                  max={Math.max(ragSyncProgress.total, 1)}
+                />
+                <span className="llm-hub-rag-sync-progress-text">
+                  {ragSyncProgress.filePath} ({ragSyncProgress.current}/{ragSyncProgress.total})
+                </span>
+              </div>
+            )}
             <div className="llm-hub-rag-config-row">
               <label>{t("search.refineModel")}</label>
               <select
@@ -639,6 +700,16 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
               value={scoreThreshold}
               onChange={e => setScoreThreshold(Math.max(0, Math.min(1, parseFloat(e.target.value) || 0)))}
               className="llm-hub-search-param-input"
+            />
+          </label>
+          <label className="llm-hub-search-param-label">
+            {t("search.fileExtensions")}:
+            <input
+              type="text"
+              value={searchFileExtensions}
+              onChange={e => setSearchFileExtensions(e.target.value)}
+              className="llm-hub-search-param-input llm-hub-search-param-input-ext"
+              placeholder={t("search.fileExtensionsPlaceholder")}
             />
           </label>
         </div>
@@ -771,7 +842,14 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
                       e.stopPropagation();
                       const file = plugin.app.vault.getAbstractFileByPath(result.filePath);
                       if (file) {
-                        void plugin.app.workspace.openLinkText(result.filePath, "", false);
+                        let linkPath = result.filePath;
+                        if (result.contentType === "pdf" && result.pageLabel) {
+                          const startPage = parsePdfStartPage(result.pageLabel);
+                          if (startPage) {
+                            linkPath += `#page=${startPage}`;
+                          }
+                        }
+                        void plugin.app.workspace.openLinkText(linkPath, "", false);
                       } else {
                         new Notice(result.filePath, 5000);
                       }
@@ -780,21 +858,57 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
                   >
                     {result.filePath}
                   </span>
+                  {result.contentType === "pdf" && result.pageLabel && (
+                    <span className="llm-hub-search-result-page-label">{result.pageLabel}</span>
+                  )}
                   <span className="llm-hub-search-result-score">
                     {(result.score * 100).toFixed(1)}%
                   </span>
+                  {result.contentType === "pdf" && (
+                    <>
+                      <span className="llm-hub-search-result-pdf-badge">PDF</span>
+                      <select
+                        className="llm-hub-search-pdf-mode"
+                        value={pdfModes.get(index) ?? "text"}
+                        onClick={e => e.stopPropagation()}
+                        onChange={e => {
+                          e.stopPropagation();
+                          const mode = e.target.value as "text" | "pdf";
+                          setPdfModes(prev => new Map(prev).set(index, mode));
+                          if (mode === "pdf" && expandedIndices.has(index)) {
+                            loadPdfPreview(index, result);
+                          }
+                        }}
+                      >
+                        <option value="text">{t("search.pdfMode.text")}</option>
+                        <option value="pdf">{t("search.pdfMode.pdf")}</option>
+                      </select>
+                    </>
+                  )}
                   {editedIndices.has(index) && (
                     <span className="llm-hub-search-result-edited-badge">{t("search.edited")}</span>
                   )}
                 </div>
-                <div
-                  className={`llm-hub-search-result-preview ${expandedIndices.has(index) ? "expanded" : ""}`}
-                  onClick={e => { e.stopPropagation(); toggleExpanded(index); }}
-                >
-                  {expandedIndices.has(index) ? result.text : (
-                    result.text.length > 300 ? result.text.slice(0, 300) + "..." : result.text
-                  )}
-                </div>
+                {result.contentType === "pdf" && (pdfModes.get(index) ?? "text") === "pdf" ? (
+                  expandedIndices.has(index) ? (
+                    <div className="llm-hub-search-media-preview" onClick={e => e.stopPropagation()}>
+                      {mediaPreviews.has(index) ? (
+                        <iframe src={mediaPreviews.get(index)} className="llm-hub-search-pdf-iframe" />
+                      ) : (
+                        <Loader2 size={18} className="llm-hub-spinner" />
+                      )}
+                    </div>
+                  ) : null
+                ) : (
+                  <div
+                    className={`llm-hub-search-result-preview ${expandedIndices.has(index) ? "expanded" : ""}`}
+                    onClick={e => { e.stopPropagation(); toggleExpanded(index); }}
+                  >
+                    {expandedIndices.has(index) ? result.text : (
+                      result.text.length > 300 ? result.text.slice(0, 300) + "..." : result.text
+                    )}
+                  </div>
+                )}
                 <div className="llm-hub-search-result-actions">
                   {expandedIndices.has(index) && (
                     <button
@@ -822,10 +936,17 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
                       <Pencil size={14} />
                     </button>
                   )}
-                  {result.text.length > 300 && (
+                  {(result.text.length > 300 || result.contentType === "pdf") && (
                     <button
                       className="llm-hub-search-result-toggle"
-                      onClick={e => { e.stopPropagation(); toggleExpanded(index); }}
+                      onClick={e => {
+                        e.stopPropagation();
+                        const nextExpanded = !expandedIndices.has(index);
+                        toggleExpanded(index);
+                        if (nextExpanded && result.contentType === "pdf" && (pdfModes.get(index) ?? "text") === "pdf") {
+                          loadPdfPreview(index, result);
+                        }
+                      }}
                     >
                       <ChevronDown size={14} className={expandedIndices.has(index) ? "llm-hub-chevron-rotated" : ""} />
                     </button>

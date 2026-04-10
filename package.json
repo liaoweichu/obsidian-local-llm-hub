@@ -45,6 +45,7 @@
   "dependencies": {
     "diff": "^8.0.3",
     "lucide-react": "^0.503.0",
+    "pdf-lib": "^1.17.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   }

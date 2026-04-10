@@ -4669,6 +4669,54 @@ body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) 
   text-align: center;
 }
 
+.llm-hub-rag-sync-progress-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.llm-hub-rag-sync-progress-bar progress {
+  width: 100%;
+  height: 8px;
+}
+
+.llm-hub-rag-sync-progress-text {
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.llm-hub-hidden {
+  display: none;
+}
+
+.llm-hub-settings-sync-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+  margin-left: 24px;
+}
+
+.llm-hub-settings-sync-progress-bar {
+  width: 100%;
+  height: 8px;
+}
+
+.llm-hub-settings-sync-progress-text {
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.llm-hub-settings-sync-progress-error {
+  color: var(--text-error);
+}
+
 .llm-hub-rag-indexed-file-item {
   display: flex;
   align-items: center;
@@ -4724,6 +4772,11 @@ body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) 
   font-size: 12px;
   padding: 2px 4px;
   text-align: center;
+}
+
+.llm-hub-search-param-input-ext {
+  width: 90px;
+  text-align: left;
 }
 
 .llm-hub-search-query-row {
@@ -4960,6 +5013,29 @@ body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) 
   border-left: 3px solid var(--interactive-accent);
 }
 
+.llm-hub-search-result-pdf-badge {
+  font-size: 10px;
+  color: var(--text-error);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.llm-hub-search-result-page-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.llm-hub-search-pdf-mode {
+  font-size: 10px;
+  padding: 1px 4px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: var(--background-primary);
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
 .llm-hub-search-result-edited-badge {
   font-size: 10px;
   color: var(--interactive-accent);
@@ -4981,6 +5057,25 @@ body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) 
 .llm-hub-search-result-preview.expanded {
   max-height: 300px;
   overflow-y: auto;
+}
+
+.llm-hub-search-media-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 160px;
+  margin-top: 6px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-primary);
+  overflow: hidden;
+}
+
+.llm-hub-search-pdf-iframe {
+  width: 100%;
+  height: 480px;
+  border: 0;
+  background: var(--background-primary);
 }
 
 .llm-hub-search-result-toggle {

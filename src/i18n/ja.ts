@@ -102,6 +102,8 @@ export const ja: Record<string, string> = {
   "settings.ragExternalActive": "外部インデックスを使用中",
   "settings.ragSync": "今すぐ同期",
   "settings.ragSyncing": "同期中...",
+  "settings.syncPreparing": "同期を準備中...",
+  "settings.ragSyncingFile": "同期中",
   "settings.ragSynced": "{{files}}ファイルから{{count}}チャンクを同期しました",
   "settings.ragSyncFailed": "同期失敗: {{error}}",
   "settings.syncCancelled": "同期がキャンセルされました",
@@ -773,6 +775,11 @@ export const ja: Record<string, string> = {
   "search.refineModelNone": "なし（AI整形無効）",
   "search.refineModelRequired": "AI整形を有効にするには検索設定でモデルを選択してください",
   "search.edited": "編集済み",
+  "search.fileExtensions": "Ext",
+  "search.fileExtensionsPlaceholder": "md, pdf",
+  "search.pdfMode.text": "text表示",
+  "search.pdfMode.pdf": "PDF表示",
+  "search.pdfPreviewFailed": "PDFプレビューに失敗しました",
   "search.scoreThreshold": "最低スコア",
 
   // RAG source modal

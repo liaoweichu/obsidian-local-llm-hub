@@ -103,7 +103,7 @@ Connect local [MCP](https://modelcontextprotocol.io/) servers to extend the AI w
 
 ### RAG (Local Embeddings)
 
-Index your vault with a local embedding model (e.g. `nomic-embed-text`). Relevant notes are automatically included as context. Everything computed and stored locally.
+Index your vault with a local embedding model (e.g. `nomic-embed-text`). Relevant notes and PDFs are automatically included as context. PDF text is extracted via PDF.js and chunked alongside Markdown files. Everything computed and stored locally.
 
 ### RAG Search
 

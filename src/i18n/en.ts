@@ -102,6 +102,8 @@ export const en = {
   "settings.ragExternalActive": "Using external index",
   "settings.ragSync": "Sync now",
   "settings.ragSyncing": "Syncing...",
+  "settings.syncPreparing": "Preparing sync...",
+  "settings.ragSyncingFile": "Syncing",
   "settings.ragSynced": "Synced {{count}} chunks from {{files}} files",
   "settings.ragSyncFailed": "Sync failed: {{error}}",
   "settings.syncCancelled": "Sync cancelled",
@@ -777,6 +779,11 @@ export const en = {
   "search.refineModelNone": "None (AI refine disabled)",
   "search.refineModelRequired": "Select a model in search settings to enable AI refine",
   "search.edited": "Edited",
+  "search.fileExtensions": "Ext",
+  "search.fileExtensionsPlaceholder": "md, pdf",
+  "search.pdfMode.text": "as Text",
+  "search.pdfMode.pdf": "as PDF",
+  "search.pdfPreviewFailed": "PDF preview failed",
   "search.scoreThreshold": "Min score",
 
   // RAG source modal

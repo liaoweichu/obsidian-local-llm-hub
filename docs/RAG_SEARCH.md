@@ -12,6 +12,17 @@ The **RAG Search** tab provides a dedicated interface for semantic vector search
 
 Results are ranked by cosine similarity between the query embedding and each indexed chunk.
 
+Both **Markdown** and **PDF** files in the vault are indexed. PDF text is automatically extracted using Obsidian's built-in PDF.js and chunked the same way as Markdown content. PDFs with no extractable text (e.g. scanned/image-only) are skipped.
+
+## PDF Result Handling
+
+PDF search results are displayed with a **PDF** badge and page range (e.g. `PDF (pages 2-5 of 24)`) in the result header. The page range is computed from the chunk's position in the extracted text.
+
+- **As text** — The extracted text is shown in the result preview, supports keyword filtering, and can be edited in the chunk editor
+- **As PDF** — Click the file path to open the original PDF in Obsidian
+
+If PDF text extraction fails temporarily (e.g. encrypted PDF, read error), existing indexed chunks are preserved on the next sync rather than being silently removed.
+
 ## Keyword Filter
 
 After a semantic search, use the keyword filter at the top of the results list to narrow down results. Multiple filter fields can be combined for precise filtering.

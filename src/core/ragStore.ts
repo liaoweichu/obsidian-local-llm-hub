@@ -4,7 +4,7 @@
  * Supports multiple named RAG settings, each with its own index.
  */
 
-import { type App, TFile } from "obsidian";
+import { type App, TFile, loadPdfJs } from "obsidian";
 import type { LocalLlmConfig, RagSetting } from "../types";
 import { WORKSPACE_FOLDER } from "../types";
 import { generateEmbeddings, generateEmbedding } from "./embeddingProvider";
@@ -26,10 +26,18 @@ export interface SyncResult {
   indexedFiles: number;
 }
 
+export interface RagSyncProgress {
+  current: number;
+  total: number;
+  filePath: string;
+}
+
 export interface RagSearchResult {
   text: string;
   filePath: string;
   score: number;
+  contentType?: string; // "pdf" for PDF-origin chunks
+  pageLabel?: string;   // PDF page range (e.g. "pages 1-6 of 24")
 }
 
 export interface RagStatus {
@@ -116,20 +124,47 @@ class RagStore {
     ragSetting: RagSetting,
     llmConfig: LocalLlmConfig,
     signal?: AbortSignal,
+    onProgress?: (progress: RagSyncProgress) => void,
   ): Promise<SyncResult> {
     // Get markdown files matching target/exclude criteria
     const files = getTargetFiles(app, ragSetting);
+    const totalFiles = files.length;
 
     // Compute checksums for all files
     const newChecksums: Record<string, string> = {};
     const fileContents = new Map<string, string>();
+    const pdfInfoMap = new Map<string, PdfExtractResult>();
+    const pdfExtractFailed = new Set<string>();
 
-    for (const file of files) {
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
       throwIfAborted(signal);
-      const content = await app.vault.cachedRead(file);
-      const checksum = simpleChecksum(content);
-      newChecksums[file.path] = checksum;
-      fileContents.set(file.path, content);
+      onProgress?.({
+        current: i + 1,
+        total: totalFiles,
+        filePath: file.path,
+      });
+      if (file.extension === "pdf") {
+        let result: PdfExtractResult | null;
+        try {
+          result = await extractPdfText(app, file);
+        } catch (err) {
+          // Extraction failed — mark for preserving old chunks later
+          console.warn(`Local LLM Hub: PDF extraction failed for ${file.path}:`, err);
+          pdfExtractFailed.add(file.path);
+          continue;
+        }
+        if (!result) continue; // skip PDFs with no extractable text
+        const checksum = simpleChecksum(result.text);
+        newChecksums[file.path] = checksum;
+        fileContents.set(file.path, result.text);
+        pdfInfoMap.set(file.path, result);
+      } else {
+        const content = await app.vault.cachedRead(file);
+        const checksum = simpleChecksum(content);
+        newChecksums[file.path] = checksum;
+        fileContents.set(file.path, content);
+      }
     }
 
     // Force fresh load
@@ -160,7 +195,14 @@ class RagStore {
       vectors: [],
     };
 
-    // Keep chunks from unchanged files
+    // Preserve old checksums for PDFs that failed extraction
+    for (const failedPath of pdfExtractFailed) {
+      if (oldChecksums[failedPath]) {
+        newChecksums[failedPath] = oldChecksums[failedPath];
+      }
+    }
+
+    // Keep chunks from unchanged files (includes failed-extraction PDFs with preserved checksums)
     if (index && vectors) {
       for (let i = 0; i < index.meta.length; i++) {
         const chunk = index.meta[i];
@@ -193,17 +235,29 @@ class RagStore {
         const content = fileContents.get(filePath);
         if (!content) continue;
 
+        const isPdf = filePath.endsWith(".pdf");
+        const pdfInfo = isPdf ? pdfInfoMap.get(filePath) : undefined;
         const chunks = chunkText(content, ragSetting.chunkSize, ragSetting.chunkOverlap);
         for (const chunk of chunks) {
-          const heading = findNearestHeading(content, chunk.startOffset);
+          const heading = isPdf ? null : findNearestHeading(content, chunk.startOffset);
           const prefix = heading ? `[${filePath} > ${heading}]\n` : `[${filePath}]\n`;
           const embeddingText = prefix + chunk.text;
           allTexts.push(embeddingText);
-          allMetas.push({
+          const meta: ChunkMeta = {
             filePath,
             startOffset: chunk.startOffset,
             text: chunk.text,
-          });
+          };
+          if (isPdf) {
+            meta.contentType = "pdf";
+            if (pdfInfo) {
+              meta.pageLabel = computePageLabel(
+                chunk.startOffset, chunk.startOffset + chunk.text.length,
+                pdfInfo.pageOffsets, pdfInfo.numPages,
+              );
+            }
+          }
+          allMetas.push(meta);
         }
       }
 
@@ -305,38 +359,73 @@ class RagStore {
 
     // Read and embed the file
     const file = app.vault.getAbstractFileByPath(filePath);
-    if (file instanceof TFile && file.extension === "md") {
-      const content = await app.vault.cachedRead(file);
-      const checksum = simpleChecksum(content);
-
-      if (!oldPath && checksum === checksums[filePath]) {
-        return { path: filePath, syncedAt: new Date().toISOString() };
+    const isSupportedFile = file instanceof TFile && (file.extension === "md" || file.extension === "pdf");
+    if (isSupportedFile) {
+      const isPdf = file.extension === "pdf";
+      let content: string | null;
+      let pdfInfo: PdfExtractResult | undefined;
+      if (isPdf) {
+        let result: PdfExtractResult | null;
+        try {
+          result = await extractPdfText(app, file);
+        } catch (err) {
+          // Extraction failed — preserve existing chunks, don't modify the index
+          console.warn(`Local LLM Hub: PDF extraction failed for ${filePath}:`, err);
+          return { path: filePath, syncedAt: new Date().toISOString() };
+        }
+        if (!result) {
+          content = null;
+          delete checksums[filePath];
+        } else {
+          content = result.text;
+          pdfInfo = result;
+        }
+      } else {
+        content = await app.vault.cachedRead(file);
       }
 
-      checksums[filePath] = checksum;
+      if (content) {
+        const checksum = simpleChecksum(content);
 
-      const chunks = chunkText(content, ragSetting.chunkSize, ragSetting.chunkOverlap);
-      if (chunks.length > 0) {
-        const texts = chunks.map(c => {
-          const heading = findNearestHeading(content, c.startOffset);
-          const prefix = heading ? `[${filePath} > ${heading}]\n` : `[${filePath}]\n`;
-          return prefix + c.text;
-        });
-        const BATCH_SIZE = 32;
-        const newEmbeddings: number[][] = [];
-        for (let i = 0; i < texts.length; i += BATCH_SIZE) {
-          const batch = texts.slice(i, i + BATCH_SIZE);
-          const embeddings = await generateEmbeddings(batch, ragSetting, llmConfig);
-          newEmbeddings.push(...embeddings);
+        if (!oldPath && checksum === checksums[filePath]) {
+          return { path: filePath, syncedAt: new Date().toISOString() };
         }
 
-        for (let i = 0; i < chunks.length; i++) {
-          keptMeta.push({
-            filePath,
-            startOffset: chunks[i].startOffset,
-            text: chunks[i].text,
+        checksums[filePath] = checksum;
+
+        const chunks = chunkText(content, ragSetting.chunkSize, ragSetting.chunkOverlap);
+        if (chunks.length > 0) {
+          const texts = chunks.map(c => {
+            const heading = isPdf ? null : findNearestHeading(content, c.startOffset);
+            const prefix = heading ? `[${filePath} > ${heading}]\n` : `[${filePath}]\n`;
+            return prefix + c.text;
           });
-          keptVectors.push(newEmbeddings[i]);
+          const BATCH_SIZE = 32;
+          const newEmbeddings: number[][] = [];
+          for (let i = 0; i < texts.length; i += BATCH_SIZE) {
+            const batch = texts.slice(i, i + BATCH_SIZE);
+            const embeddings = await generateEmbeddings(batch, ragSetting, llmConfig);
+            newEmbeddings.push(...embeddings);
+          }
+
+          for (let i = 0; i < chunks.length; i++) {
+            const meta: ChunkMeta = {
+              filePath,
+              startOffset: chunks[i].startOffset,
+              text: chunks[i].text,
+            };
+            if (isPdf) {
+              meta.contentType = "pdf";
+              if (pdfInfo) {
+                meta.pageLabel = computePageLabel(
+                  chunks[i].startOffset, chunks[i].startOffset + chunks[i].text.length,
+                  pdfInfo.pageOffsets, pdfInfo.numPages,
+                );
+              }
+            }
+            keptMeta.push(meta);
+            keptVectors.push(newEmbeddings[i]);
+          }
         }
       }
     } else {
@@ -380,6 +469,7 @@ class RagStore {
     ragSetting: RagSetting,
     llmConfig: LocalLlmConfig,
     app: App,
+    fileExtensions?: string[],
   ): Promise<RagSearchResult[]> {
     const entry = await this.ensureLoaded(app, settingName, {
       externalIndexPath: ragSetting.externalIndexPath,
@@ -393,10 +483,19 @@ class RagStore {
     const queryEmbedding = await generateEmbedding(query, ragSetting, llmConfig);
     const queryVec = new Float32Array(queryEmbedding);
     const dim = index.dimension;
+    const normalizedExtensions = new Set(
+      (fileExtensions ?? [])
+        .map(ext => ext.trim().toLowerCase().replace(/^\./, ""))
+        .filter(ext => ext.length > 0)
+    );
 
     // Compute cosine similarities
     const scores: { index: number; score: number }[] = [];
     for (let i = 0; i < index.meta.length; i++) {
+      if (normalizedExtensions.size > 0) {
+        const fileExt = index.meta[i].filePath.split(".").pop()?.toLowerCase() ?? "";
+        if (!normalizedExtensions.has(fileExt)) continue;
+      }
       const start = i * dim;
       const end = start + dim;
       if (end > vectors.length) break;
@@ -415,6 +514,8 @@ class RagStore {
       text: index.meta[idx].text,
       filePath: index.meta[idx].filePath,
       score,
+      ...(index.meta[idx].contentType && { contentType: index.meta[idx].contentType }),
+      ...(index.meta[idx].pageLabel && { pageLabel: index.meta[idx].pageLabel }),
     }));
   }
 
@@ -433,18 +534,27 @@ class RagStore {
 
   /** Keyword search across indexed chunks (no embedding API call needed). */
   async keywordSearch(
-    app: App, settingName: string, query: string, topK: number,
+    app: App, settingName: string, query: string, topK: number, fileExtensions?: string[],
   ): Promise<RagSearchResult[]> {
     const entry = await this.ensureLoaded(app, settingName);
     if (!entry.index) return [];
 
     const terms = query.toLowerCase().split(/\s+/).filter(t => t.length > 0);
     if (terms.length === 0) return [];
+    const normalizedExtensions = new Set(
+      (fileExtensions ?? [])
+        .map(ext => ext.trim().toLowerCase().replace(/^\./, ""))
+        .filter(ext => ext.length > 0)
+    );
 
     const scored: { index: number; score: number }[] = [];
 
     for (let i = 0; i < entry.index.meta.length; i++) {
       const meta = entry.index.meta[i];
+      if (normalizedExtensions.size > 0) {
+        const fileExt = meta.filePath.split(".").pop()?.toLowerCase() ?? "";
+        if (!normalizedExtensions.has(fileExt)) continue;
+      }
       const textLower = meta.text.toLowerCase();
       let matchCount = 0;
       let totalOccurrences = 0;
@@ -469,11 +579,16 @@ class RagStore {
     }
 
     scored.sort((a, b) => b.score - a.score);
-    return scored.slice(0, topK).map(r => ({
-      filePath: entry.index!.meta[r.index].filePath,
-      text: entry.index!.meta[r.index].text,
-      score: r.score,
-    }));
+    return scored.slice(0, topK).map(r => {
+      const meta = entry.index!.meta[r.index];
+      return {
+        filePath: meta.filePath,
+        text: meta.text,
+        score: r.score,
+        ...(meta.contentType && { contentType: meta.contentType }),
+        ...(meta.pageLabel && { pageLabel: meta.pageLabel }),
+      };
+    });
   }
 
   /** Get an adjacent chunk (prev/next) for a given file.
@@ -498,7 +613,13 @@ class RagStore {
     if (targetPos < 0 || targetPos >= fileChunks.length) return null;
 
     const meta = fileChunks[targetPos].meta;
-    return { filePath: meta.filePath, text: meta.text, score: 0 };
+    return {
+      filePath: meta.filePath,
+      text: meta.text,
+      score: 0,
+      ...(meta.contentType && { contentType: meta.contentType }),
+      ...(meta.pageLabel && { pageLabel: meta.pageLabel }),
+    };
   }
 
   /**
@@ -566,8 +687,62 @@ export function getRagStore(): RagStore {
 
 // --- Utility functions ---
 
+interface PdfExtractResult {
+  text: string;
+  numPages: number;
+  /** Character offset where each page starts. pageOffsets[i] = offset of page i+1. */
+  pageOffsets: number[];
+}
+
+/**
+ * Extract text from a PDF file using Obsidian's built-in PDF.js.
+ * Returns null if the PDF has no extractable text (e.g. scanned/image-only).
+ * Throws on read/parse errors so callers can preserve existing index data.
+ */
+async function extractPdfText(app: App, file: TFile): Promise<PdfExtractResult | null> {
+  const buffer = await app.vault.readBinary(file);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const pdfjsLib: any = await loadPdfJs();
+  const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+  const pageTexts: string[] = [];
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const text = content.items.map((item: any) => item.str).join(" ");
+    pageTexts.push(text.trim() ? text : "");
+  }
+  // Build joined text with page offset tracking
+  const parts: string[] = [];
+  const pageOffsets: number[] = [];
+  let offset = 0;
+  for (let i = 0; i < pageTexts.length; i++) {
+    pageOffsets.push(offset);
+    if (pageTexts[i]) {
+      if (parts.length > 0) offset++; // for "\n" separator
+      parts.push(pageTexts[i]);
+      offset += pageTexts[i].length;
+    }
+  }
+  if (parts.length === 0) return null;
+  return { text: parts.join("\n"), numPages: pdf.numPages, pageOffsets };
+}
+
+/**
+ * Compute a page label (e.g. "pages 2-5 of 24") for a chunk based on its offset and length.
+ */
+function computePageLabel(startOffset: number, endOffset: number, pageOffsets: number[], numPages: number): string {
+  let startPage = 1;
+  let endPage = 1;
+  for (let i = 0; i < pageOffsets.length; i++) {
+    if (pageOffsets[i] <= startOffset) startPage = i + 1;
+    if (pageOffsets[i] <= endOffset) endPage = i + 1;
+  }
+  return `pages ${startPage}-${endPage} of ${numPages}`;
+}
+
 function getTargetFiles(app: App, ragSetting: RagSetting): TFile[] {
-  const files = app.vault.getMarkdownFiles();
+  const files = app.vault.getFiles().filter(f => f.extension === "md" || f.extension === "pdf");
   const excludeRegexes = ragSetting.excludePatterns
     .filter(Boolean)
     .flatMap(p => {

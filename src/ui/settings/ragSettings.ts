@@ -391,6 +391,17 @@ function displaySelectedRagSetting(
   void store.load(plugin.app, [name], { [name]: ragSetting }).then(updateStatusDesc);
 
   if (!isExternal) {
+    const progressContainer = statusSetting.settingEl.createDiv({
+      cls: "llm-hub-settings-sync-progress",
+    });
+    progressContainer.addClass("llm-hub-hidden");
+    const progressText = progressContainer.createDiv({
+      cls: "llm-hub-settings-sync-progress-text",
+    });
+    const progressBar = progressContainer.createEl("progress", {
+      cls: "llm-hub-settings-sync-progress-bar",
+    });
+
     // Sync button (vault sync only)
     statusSetting.addButton((btn) =>
       btn
@@ -399,22 +410,38 @@ function displaySelectedRagSetting(
         .onClick(async () => {
           btn.setButtonText(t("settings.ragSyncing"));
           btn.setDisabled(true);
+          progressContainer.removeClass("llm-hub-hidden");
+          progressText.removeClass("llm-hub-settings-sync-progress-error");
+          progressText.setText(t("settings.syncPreparing"));
+          progressBar.value = 0;
+          progressBar.max = 100;
           try {
             const result = await store.sync(
               plugin.app,
               name,
               ragSetting,
               plugin.settings.llmConfig,
+              undefined,
+              (progress) => {
+                const percent = Math.round((progress.current / Math.max(progress.total, 1)) * 100);
+                progressBar.value = percent;
+                progressBar.max = 100;
+                progressText.setText(`${t("settings.ragSyncingFile")}: ${progress.filePath} (${progress.current}/${progress.total})`);
+              },
             );
             new Notice(t("settings.ragSynced", {
               count: String(result.totalChunks),
               files: String(result.indexedFiles),
             }));
+            progressContainer.addClass("llm-hub-hidden");
             display();
           } catch (err) {
             new Notice(t("settings.ragSyncFailed", {
               error: err instanceof Error ? err.message : String(err),
             }));
+            progressText.setText(`${t("common.error")}: ${err instanceof Error ? err.message : String(err)}`);
+            progressText.addClass("llm-hub-settings-sync-progress-error");
+            window.setTimeout(() => progressContainer.addClass("llm-hub-hidden"), 2000);
           } finally {
             btn.setButtonText(t("settings.ragSync"));
             btn.setDisabled(false);

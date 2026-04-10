@@ -11,6 +11,8 @@ export interface ChunkMeta {
   filePath: string;
   startOffset: number;
   text: string;
+  contentType?: string; // "pdf" for PDF-origin chunks; undefined for markdown
+  pageLabel?: string;   // PDF page range (e.g. "pages 1-6 of 24")
 }
 
 export interface RagIndex {
@@ -233,6 +235,7 @@ export async function loadExternalRagIndex(dirPath: string): Promise<RagIndex | 
     // Normalize external index meta fields (e.g. file_path -> filePath, start_offset -> startOffset)
     if (raw.meta && raw.meta.length > 0 && !("filePath" in raw.meta[0]) && ("file_path" in raw.meta[0])) {
       raw.meta = raw.meta.map((m: Record<string, unknown>) => ({
+        ...m,
         filePath: m.file_path as string,
         startOffset: (m.start_offset as number) ?? (m.startOffset as number) ?? 0,
         text: (m.text as string) || "",
