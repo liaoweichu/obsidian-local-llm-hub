@@ -81,6 +81,9 @@ const Chat = forwardRef<ChatRef, ChatProps>(({ plugin }, ref) => {
   const abortControllerRef = useRef<AbortController | null>(null);
   const inputAreaRef = useRef<InputAreaHandle>(null);
   const chatCreatedAt = useRef<number>(Date.now());
+  // Set to true once user interacts (newChat, loadChat, sendMessage)
+  // so the mount-time restore doesn't overwrite their action.
+  const userInteractedRef = useRef(false);
 
   const baseLlmConfig = plugin.settings.llmConfig;
   const llmConfig = { ...baseLlmConfig, model: currentModel || baseLlmConfig.model };
@@ -142,6 +145,40 @@ const Chat = forwardRef<ChatRef, ChatProps>(({ plugin }, ref) => {
   useEffect(() => {
     refreshVaultFiles();
   }, []);
+
+  // Restore last active chat on mount
+  useEffect(() => {
+    let cancelled = false;
+    const lastId = plugin.lastActiveChatId;
+    if (!lastId) return;
+
+    void (async () => {
+      try {
+        const folder = `${WORKSPACE_FOLDER}/chats`;
+        const filePath = `${folder}/${lastId}.md`;
+        const file = plugin.app.vault.getAbstractFileByPath(filePath);
+        if (!(file instanceof TFile) || cancelled || userInteractedRef.current) return;
+
+        const content = await plugin.app.vault.cachedRead(file);
+        if (cancelled || userInteractedRef.current) return;
+        const parsed = parseMarkdownToMessages(content);
+        if (parsed?.messages && parsed.messages.length > 0) {
+          setMessages(parsed.messages);
+          setCurrentChatId(lastId);
+          chatCreatedAt.current = parsed.createdAt;
+        }
+      } catch (e) {
+        console.warn("Failed to restore last active chat:", e);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [plugin]);
+
+  // Sync currentChatId → plugin.lastActiveChatId (in-memory, cleared on restart)
+  useEffect(() => {
+    plugin.lastActiveChatId = currentChatId;
+  }, [currentChatId, plugin]);
 
   // Discover skills (on mount + when skills-changed is emitted)
   const refreshSkills = useCallback(() => {
@@ -281,10 +318,10 @@ const Chat = forwardRef<ChatRef, ChatProps>(({ plugin }, ref) => {
   }, [plugin]);
 
   // Save chat history
-  const saveCurrentChat = useCallback(async (msgs: Message[], title?: string) => {
+  const saveCurrentChat = useCallback(async (msgs: Message[]) => {
     if (!plugin.settings.saveChatHistory || msgs.length === 0) return;
 
-    const chatTitle = title || generateChatTitle(msgs);
+    const chatTitle = generateChatTitle(msgs);
     const folder = `${WORKSPACE_FOLDER}/chats`;
 
     // Ensure folder exists
@@ -370,10 +407,23 @@ const Chat = forwardRef<ChatRef, ChatProps>(({ plugin }, ref) => {
 
   // Load a chat from history
   const loadChat = useCallback((history: ChatHistory) => {
+    userInteractedRef.current = true;
     setMessages(history.messages);
     setCurrentChatId(history.id);
     chatCreatedAt.current = history.createdAt;
     setShowHistory(false);
+  }, []);
+
+  // New chat
+  const newChat = useCallback(() => {
+    userInteractedRef.current = true;
+    setMessages([]);
+    setCurrentChatId(null);
+    setStreamingContent("");
+    setStreamingThinking("");
+    chatCreatedAt.current = Date.now();
+    setShowHistory(false);
+    setActiveSkillPaths(DEFAULT_BUILTIN_SKILL_IDS.map(builtinFolderPath));
   }, []);
 
   // Delete a chat
@@ -389,17 +439,6 @@ const Chat = forwardRef<ChatRef, ChatProps>(({ plugin }, ref) => {
     }
     await loadChatHistories();
   }, [currentChatId, plugin, loadChatHistories]);
-
-  // New chat
-  const newChat = useCallback(() => {
-    setMessages([]);
-    setCurrentChatId(null);
-    setStreamingContent("");
-    setStreamingThinking("");
-    chatCreatedAt.current = Date.now();
-    setShowHistory(false);
-    setActiveSkillPaths(DEFAULT_BUILTIN_SKILL_IDS.map(builtinFolderPath));
-  }, []);
 
   // Stop generation
   const handleStop = useCallback(() => {
@@ -419,7 +458,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({ plugin }, ref) => {
     setIsCompacting(true);
     try {
       // Save current chat first
-      await saveCurrentChat(messages, undefined);
+      await saveCurrentChat(messages);
 
       const conversationText = messages.map(msg => {
         const role = msg.role === "user" ? "User" : "Assistant";
@@ -462,7 +501,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({ plugin }, ref) => {
       setMessages(newMessages);
       chatCreatedAt.current = now;
 
-      await saveCurrentChat(newMessages, undefined);
+      await saveCurrentChat(newMessages);
       new Notice(t("chat.compacted", { before: String(beforeCount), after: "2" }));
     } catch (error) {
       const msg = error instanceof Error ? error.message : t("chat.unknownError");
@@ -495,6 +534,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({ plugin }, ref) => {
 
   // Send message
   const sendMessage = useCallback(async (content: string, attachments?: Attachment[], skillPath?: string) => {
+    userInteractedRef.current = true;
     if (!plugin.settings.llmVerified) {
       new Notice(t("chat.llmNotVerified"));
       return;
@@ -750,7 +790,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({ plugin }, ref) => {
       setStreamingContent("");
       setStreamingThinking("");
 
-      await saveCurrentChat(displayMessages, undefined);
+      await saveCurrentChat(displayMessages);
     } catch (error) {
       const errorMessage = buildErrorMessage(error);
 
@@ -788,6 +828,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({ plugin }, ref) => {
           <button
             className="llm-hub-header-btn"
             onClick={newChat}
+            disabled={isLoading}
             title={t("chat.newChat")}
           >
             <Plus size={16} />

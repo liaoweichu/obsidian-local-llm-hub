@@ -50,6 +50,8 @@ export class LocalLlmHubPlugin extends Plugin {
   workflowManager!: WorkflowManager;
   mcpManager = new McpManager();
   selectionManager!: SelectionManager;
+  /** In-memory only – cleared on Obsidian restart */
+  lastActiveChatId: string | null = null;
   private lastActiveMarkdownView: MarkdownView | null = null;
 
   onload(): void {
