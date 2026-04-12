@@ -541,11 +541,12 @@ export class WorkflowGenerationModal extends Modal {
       text: t("message.copy"),
       cls: "llm-hub-workflow-generation-copy-btn",
     });
-    copyBtn.addEventListener("click", async () => {
-      await navigator.clipboard.writeText(response);
-      const original = copyBtn.textContent;
-      copyBtn.textContent = "✓";
-      setTimeout(() => { copyBtn.textContent = original; }, 1200);
+    copyBtn.addEventListener("click", () => {
+      void navigator.clipboard.writeText(response).then(() => {
+        const original = copyBtn.textContent;
+        copyBtn.textContent = "✓";
+        setTimeout(() => { copyBtn.textContent = original; }, 1200);
+      });
     });
 
     const pre = failureEl.createEl("pre", { cls: "llm-hub-workflow-generation-parse-failure-body" });
