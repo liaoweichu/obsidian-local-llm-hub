@@ -158,11 +158,11 @@ export class WorkflowPreviewModal extends Modal {
     const yamlPre = yamlDetails.createEl("pre", { cls: "llm-hub-workflow-preview-yaml" });
     yamlPre.textContent = this.yaml;
 
-    // Generation context (plan/thinking/review) as collapsible sections.
-    // In the preview modal the plan/review are primary content, so open by default.
+    // Keep plan/thinking/review collapsed by default — the workflow node list
+    // below is the primary content in the preview modal.
     this.markdownComponent = new Component();
     this.markdownComponent.load();
-    renderGenerationContext(contentEl, this.generationContext, this.app, this.markdownComponent, { defaultOpen: true });
+    renderGenerationContext(contentEl, this.generationContext, this.app, this.markdownComponent, { defaultOpen: false });
 
     // Additional request container (hidden initially)
     this.additionalRequestContainerEl = contentEl.createDiv({

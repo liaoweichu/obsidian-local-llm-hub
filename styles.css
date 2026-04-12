@@ -5832,3 +5832,47 @@ body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) 
 .llm-hub-skill-chip-name.is-static {
   cursor: default;
 }
+
+/* Parse-failure recovery — raw response shown inside the generation modal
+   when the LLM output cannot be parsed as workflow YAML. */
+.llm-hub-workflow-generation-parse-failure {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--background-modifier-error-border, var(--background-modifier-error));
+  border-radius: 6px;
+  background: var(--background-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.llm-hub-workflow-generation-parse-failure h3 {
+  margin: 0;
+  color: var(--text-error);
+}
+
+.llm-hub-workflow-generation-parse-failure-body {
+  max-height: 40vh;
+  overflow: auto;
+  margin: 0;
+  padding: 8px;
+  background: var(--background-primary);
+  font-family: var(--font-monospace);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+
+.llm-hub-workflow-generation-parse-failure-error {
+  margin: 0;
+  padding: 6px 8px;
+  background: var(--background-modifier-error);
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: var(--font-monospace);
+  color: var(--text-error);
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}

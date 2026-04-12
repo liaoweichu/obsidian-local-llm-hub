@@ -26,7 +26,9 @@ export class WorkflowGenerationModal extends Modal {
   private phaseIndicatorEl: HTMLElement | null = null;
   private planSectionEl: HTMLElement | null = null;
   private planContainerEl: HTMLElement | null = null;
+  private thinkingSectionEl: HTMLElement | null = null;
   private thinkingContainerEl: HTMLElement | null = null;
+  private pendingThinkingSeparator: string | null = null;
   private reviewSectionEl: HTMLElement | null = null;
   private reviewContainerEl: HTMLElement | null = null;
   private statusEl: HTMLElement | null = null;
@@ -110,8 +112,12 @@ export class WorkflowGenerationModal extends Modal {
     planHeader.createEl("h3", { text: t("workflow.generation.planning") });
     this.planContainerEl = this.planSectionEl.createDiv({ cls: "llm-hub-workflow-generation-plan" });
 
-    const thinkingSection = contentEl.createDiv({ cls: "llm-hub-workflow-generation-thinking-section" });
+    // Hidden until the model emits real thinking content — models without
+    // reasoning output would otherwise show an empty panel with just phase
+    // separators.
+    const thinkingSection = contentEl.createDiv({ cls: "llm-hub-workflow-generation-thinking-section is-hidden" });
     thinkingSection.createEl("h3", { text: t("workflow.generation.thinking") });
+    this.thinkingSectionEl = thinkingSection;
     this.thinkingContainerEl = thinkingSection.createDiv({ cls: "llm-hub-workflow-generation-thinking" });
 
     this.reviewSectionEl = contentEl.createDiv({ cls: "llm-hub-workflow-generation-review-section is-hidden" });
@@ -237,6 +243,16 @@ export class WorkflowGenerationModal extends Modal {
   }
 
   appendThinking(content: string): void {
+    if (this.thinkingSectionEl) {
+      this.thinkingSectionEl.removeClass("is-hidden");
+    }
+    if (this.pendingThinkingSeparator && this.thinkingContainerEl) {
+      const sep = document.createElement("div");
+      sep.className = "llm-hub-workflow-generation-thinking-separator";
+      sep.textContent = `── ${this.pendingThinkingSeparator} ──`;
+      this.thinkingContainerEl.appendChild(sep);
+      this.pendingThinkingSeparator = null;
+    }
     this.thinkingText += content;
     if (this.thinkingContainerEl) {
       const span = document.createElement("span");
@@ -247,13 +263,10 @@ export class WorkflowGenerationModal extends Modal {
   }
 
   appendThinkingSeparator(phaseLabel: string): void {
-    if (this.thinkingContainerEl) {
-      const sep = document.createElement("div");
-      sep.className = "llm-hub-workflow-generation-thinking-separator";
-      sep.textContent = `── ${phaseLabel} ──`;
-      this.thinkingContainerEl.appendChild(sep);
-      this.thinkingContainerEl.scrollTop = this.thinkingContainerEl.scrollHeight;
-    }
+    // Defer the separator — only render it once real thinking content arrives.
+    // Overwriting with the newest phase label keeps us from accumulating
+    // separators for phases that produced no thinking output.
+    this.pendingThinkingSeparator = phaseLabel;
   }
 
   appendPlan(content: string): void {
@@ -413,6 +426,7 @@ export class WorkflowGenerationModal extends Modal {
       this.markdownComponent.unload();
       this.markdownComponent = null;
     }
+    this.pendingThinkingSeparator = null;
     this.planText = "";
     if (this.planContainerEl) {
       this.planContainerEl.empty();
@@ -469,6 +483,7 @@ export class WorkflowGenerationModal extends Modal {
   }
 
   resetReviewForIteration(): void {
+    this.pendingThinkingSeparator = null;
     this.reviewText = "";
     if (this.reviewContainerEl) {
       this.reviewContainerEl.empty();
@@ -508,6 +523,41 @@ export class WorkflowGenerationModal extends Modal {
     }
   }
 
+  showParseFailure(response: string, errorMessage?: string): void {
+    this.setComplete();
+    this.setStatus(t("workflow.generation.parseFailed"));
+
+    const failureEl = this.contentEl.createDiv({ cls: "llm-hub-workflow-generation-parse-failure" });
+    failureEl.createEl("h3", { text: t("workflow.generation.parseFailed") });
+
+    if (errorMessage) {
+      failureEl.createEl("p", {
+        text: errorMessage,
+        cls: "llm-hub-workflow-generation-parse-failure-error",
+      });
+    }
+
+    const copyBtn = failureEl.createEl("button", {
+      text: t("message.copy"),
+      cls: "llm-hub-workflow-generation-copy-btn",
+    });
+    copyBtn.addEventListener("click", async () => {
+      await navigator.clipboard.writeText(response);
+      const original = copyBtn.textContent;
+      copyBtn.textContent = "✓";
+      setTimeout(() => { copyBtn.textContent = original; }, 1200);
+    });
+
+    const pre = failureEl.createEl("pre", { cls: "llm-hub-workflow-generation-parse-failure-body" });
+    pre.textContent = response;
+
+    const closeBtn = failureEl.createEl("button", {
+      text: t("common.close"),
+      cls: "mod-cta",
+    });
+    closeBtn.addEventListener("click", () => this.close());
+  }
+
   static formatUsageNotice(usage?: StreamChunkUsage, elapsedMs?: number): string | null {
     if (!usage && elapsedMs === undefined) return null;
     const parts: string[] = [];
@@ -540,6 +590,7 @@ export class WorkflowGenerationModal extends Modal {
       this.markdownComponent.unload();
       this.markdownComponent = null;
     }
+    this.pendingThinkingSeparator = null;
     const { contentEl } = this;
     contentEl.empty();
   }

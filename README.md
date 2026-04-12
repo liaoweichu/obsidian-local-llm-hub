@@ -33,13 +33,14 @@ Describe what you want in plain language. The AI builds the workflow. No YAML kn
 
 ![Create Workflow with AI](docs/images/create_workflow.png)
 
-1. Open the **Workflow / skill** tab → select **+ New (AI)**
-2. Describe: *"Convert the current page into an infographic and save it"*
-3. Check **"Create as agent skill"** if you want to create an agent skill instead of a standalone workflow
+1. Open the **Workflow / skill** tab
+2. Click **Create workflow with AI** (or **Create skill with AI** for an agent skill)
+3. Describe: *"Convert the current page into an infographic and save it"*
 4. Click **Generate**
 5. The AI produces a plain-language **plan** first — review it and click **OK** to proceed, **Re-plan** to give feedback and regenerate the plan, or **Cancel** to abort
 6. After generation, the AI runs a **review** over the result. If issues are found you can **OK** (with a confirmation prompt), **Refine** (regenerate using the review feedback), or **Cancel**. Clean reviews proceed automatically
-7. The workflow is saved once you accept the final preview
+7. If the LLM produces invalid YAML, the plugin automatically re-prompts it with the parse error (up to 2 retries) before surfacing a recoverable failure view with the raw output
+8. The workflow is saved once you accept the final preview
 
 Don't have a powerful local model? Click **Copy Prompt**, paste into Claude/GPT/Gemini, paste the response back, and click **Apply**.
 
@@ -47,7 +48,7 @@ Don't have a powerful local model? Click **Copy Prompt**, paste into Claude/GPT/
 
 **Create workflow / skill from any file:**
 
-When opening the Workflow / skill tab with a file that has no workflow code block, separate **Create workflow with AI** and **Create skill with AI** buttons are displayed. Click either one to generate directly into the right shape without toggling a checkbox.
+When opening the Workflow / skill tab with a file that has no workflow code block, separate **Create workflow with AI** and **Create skill with AI** buttons are displayed. The header of an active `SKILL.md` also exposes **Create skill with AI** alongside **Modify skill with AI** so you can spin up a new skill without leaving the panel.
 
 ### Modify with AI
 
@@ -130,7 +131,7 @@ See [RAG_SEARCH.md](docs/RAG_SEARCH.md) for details.
 
 Inject reusable instructions into the system prompt via `SKILL.md` files. Activate per conversation. Skills can also expose workflows that the AI can invoke as tools during chat.
 
-Create skills the same way as workflows — select **+ New (AI)**, check **"Create as agent skill"** (or click **Create skill with AI** directly from a fresh file), and describe what you want. The AI generates both the `SKILL.md` instructions and the workflow. To edit an existing skill, open its `SKILL.md` and click **Modify skill with AI** in the Workflow / skill tab — the AI updates both the instructions body and the referenced workflow together.
+Create skills the same way as workflows — click **Create skill with AI** in the Workflow / skill tab and describe what you want. The AI generates both the `SKILL.md` instructions and the workflow. To edit an existing skill, open its `SKILL.md` and click **Modify skill with AI** in the Workflow / skill tab — the AI updates both the instructions body and the referenced workflow together.
 
 **Clickable skill chips:** Active skill chips in the chat input area and on assistant messages are clickable and jump to the matching `SKILL.md` (built-in skills are shown as static labels).
 
