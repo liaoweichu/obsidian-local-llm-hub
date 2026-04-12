@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { TFile, Notice, Menu, MarkdownView, stringifyYaml } from "obsidian";
+import { TFile, TFolder, Notice, Menu, MarkdownView, stringifyYaml } from "obsidian";
 import { FolderOpen, Keyboard, KeyboardOff, Plus, Sparkles, Zap, ZapOff } from "lucide-react";
 import { EventTriggerModal } from "./EventTriggerModal";
-import { SKILLS_FOLDER, type WorkflowEventTrigger } from "src/types";
+import { SKILLS_FOLDER, SKILL_FILE_BASENAME, type WorkflowEventTrigger } from "src/types";
 import { promptForAIWorkflow, type AIWorkflowResult, type ResolvedMention } from "./AIWorkflowModal";
 import { WorkflowExecutionModal } from "./WorkflowExecutionModal";
 import type { LocalLlmHubPlugin } from "src/plugin";
@@ -22,6 +22,7 @@ import { t } from "src/i18n";
 import { cryptoCache } from "src/core/cryptoCache";
 import { formatError } from "src/utils/error";
 import { promptForPassword } from "src/ui/passwordPrompt";
+import { parseFrontmatter } from "src/core/skillsLoader";
 
 interface WorkflowPanelProps {
   plugin: LocalLlmHubPlugin;
@@ -720,6 +721,135 @@ export default function WorkflowPanel({ plugin }: WorkflowPanelProps) {
     }
   };
 
+  // Modify skill (SKILL.md + related workflow) with AI
+  const handleModifySkillWithAI = async () => {
+    if (!workflowFile || workflowFile.basename !== SKILL_FILE_BASENAME) {
+      new Notice(t("workflow.noWorkflowToModify"));
+      return;
+    }
+
+    const skillContent = await plugin.app.vault.read(workflowFile);
+    const { frontmatter, body: instructions } = parseFrontmatter(skillContent);
+    const skillName = typeof frontmatter.name === "string" ? frontmatter.name : workflowFile.parent?.name || "skill";
+    const skillDescription = typeof frontmatter.description === "string" ? frontmatter.description : "";
+
+    const folder = workflowFile.parent;
+    const declaredWorkflows = Array.isArray(frontmatter.workflows)
+      ? (frontmatter.workflows as Array<Record<string, unknown>>)
+      : [];
+    const declaredFirst = declaredWorkflows[0];
+    const declaredFirstPath = declaredFirst && typeof declaredFirst.path === "string"
+      ? declaredFirst.path
+      : null;
+    const declaredFirstName = declaredFirst && typeof declaredFirst.name === "string"
+      ? declaredFirst.name
+      : null;
+
+    let workflowTargetFile: TFile | null = null;
+    if (folder && declaredFirstPath) {
+      const candidate = plugin.app.vault.getAbstractFileByPath(`${folder.path}/${declaredFirstPath}`);
+      if (candidate instanceof TFile) workflowTargetFile = candidate;
+    }
+    if (!workflowTargetFile && folder) {
+      const workflowsFolder = plugin.app.vault.getAbstractFileByPath(`${folder.path}/workflows`);
+      if (workflowsFolder instanceof TFolder) {
+        for (const child of workflowsFolder.children) {
+          if (child instanceof TFile && child.extension === "md") {
+            workflowTargetFile = child;
+            break;
+          }
+        }
+      }
+    }
+
+    const resolveBlockIndex = (content: string, name: string | null): number => {
+      if (!name) return 0;
+      const opts = listWorkflowOptions(content);
+      const idx = opts.findIndex(o => o.name === name);
+      return idx >= 0 ? idx : 0;
+    };
+
+    let currentYaml = "";
+    let blockIndex = 0;
+    if (workflowTargetFile) {
+      const wfContent = await plugin.app.vault.read(workflowTargetFile);
+      blockIndex = resolveBlockIndex(wfContent, declaredFirstName);
+      const loaded = loadFromCodeBlock(wfContent, undefined, blockIndex);
+      if (loaded.data) {
+        currentYaml = buildWorkflowYaml(loaded.data.nodes, loaded.data.name ?? null);
+      }
+    }
+    if (!currentYaml) {
+      blockIndex = resolveBlockIndex(skillContent, declaredFirstName);
+      const loaded = loadFromCodeBlock(skillContent, undefined, blockIndex);
+      if (loaded.data) {
+        currentYaml = buildWorkflowYaml(loaded.data.nodes, loaded.data.name ?? null);
+      }
+    }
+
+    const result = await promptForAIWorkflow(
+      plugin.app,
+      plugin,
+      "modify",
+      currentYaml,
+      skillName,
+      undefined,
+      { isSkill: true, existingInstructions: instructions.trim() }
+    );
+    if (!result) return;
+
+    // Preserve the user's skill description: result.description holds the modification
+    // request, not the skill description. Fall back to name — empty description weakens
+    // skill triggering and breaks downstream readers.
+    const newInstructions = (result.skillInstructions ?? instructions).trim();
+    const newName = result.name || skillName;
+    const effectiveDescription = skillDescription.trim() || newName;
+
+    const yamlName = JSON.stringify(newName);
+    const yamlDesc = JSON.stringify(effectiveDescription);
+    // Preserve path / name / description per entry so skills that target a named block
+    // inside a shared file keep working.
+    const workflowsYaml = declaredWorkflows.length > 0
+      ? declaredWorkflows
+          .map(w => {
+            const path = typeof w.path === "string" ? w.path : "";
+            const namePart = typeof w.name === "string"
+              ? `\n    name: ${JSON.stringify(w.name)}`
+              : "";
+            const descPart = typeof w.description === "string"
+              ? `\n    description: ${JSON.stringify(w.description)}`
+              : "";
+            return `  - path: ${path}${namePart}${descPart}`;
+          })
+          .join("\n")
+      : `  - path: workflows/workflow.md\n    description: ${yamlName}`;
+
+    const updatedSkillContent = `---
+name: ${yamlName}
+description: ${yamlDesc}
+workflows:
+${workflowsYaml}
+---
+
+${newInstructions}
+`;
+    await plugin.app.vault.modify(workflowFile, updatedSkillContent);
+
+    if (workflowTargetFile) {
+      await saveToCodeBlock(plugin.app, workflowTargetFile, {
+        name: result.name,
+        nodes: result.nodes,
+      }, blockIndex);
+    } else {
+      await saveToCodeBlock(plugin.app, workflowFile, {
+        name: result.name,
+        nodes: result.nodes,
+      }, blockIndex);
+    }
+
+    new Notice(t("workflow.modifiedSuccessfully"));
+  };
+
   // Add node
   const addNode = (type: WorkflowNodeType) => {
     const newNode: SidebarNode = {
@@ -1044,20 +1174,42 @@ export default function WorkflowPanel({ plugin }: WorkflowPanelProps) {
     await plugin.app.workspace.getLeaf().openFile(targetFile);
   };
 
-  // AI new creation handler (used regardless of whether a file is open)
-  const handleCreateWithAI = async () => {
-    const result = await promptForAIWorkflow(plugin.app, plugin, "create");
-    if (result && result.outputPath) {
-      await saveWorkflowResultToFile(result);
-    }
+  const handleCreateWorkflowWithAI = async () => {
+    const result = await promptForAIWorkflow(
+      plugin.app, plugin, "create", undefined, undefined, undefined, { isSkill: false }
+    );
+    if (!result || !result.outputPath) return;
+    await saveWorkflowResultToFile(result);
   };
 
-  // Open workflow selector modal
+  const handleCreateSkillWithAI = async () => {
+    const result = await promptForAIWorkflow(
+      plugin.app, plugin, "create", undefined, undefined, undefined, { isSkill: true }
+    );
+    if (!result || !result.outputPath) return;
+    await saveWorkflowResultToFile(result);
+  };
+
+  const renderMarkdownHint = (text: string) => {
+    const parts = text.split(/\*\*(.+?)\*\*/g);
+    return parts.map((part, i) =>
+      i % 2 === 1 ? <strong key={i}>{part}</strong> : <span key={i}>{part}</span>
+    );
+  };
+
+  const createHint = (
+    <div className="llm-hub-workflow-empty-create-hint">
+      <p>{renderMarkdownHint(t("workflow.createHintWorkflow"))}</p>
+      <p>{renderMarkdownHint(t("workflow.createHintSkill"))}</p>
+    </div>
+  );
+
   const handleOpenWorkflowSelector = () => {
     openBrowseAllModal();
   };
 
-  // No file selected
+  const isSkillFile = workflowFile?.basename === SKILL_FILE_BASENAME;
+
   if (!workflowFile) {
     return (
       <div className="llm-hub-workflow-sidebar">
@@ -1073,11 +1225,19 @@ export default function WorkflowPanel({ plugin }: WorkflowPanelProps) {
             </button>
             <button
               className="llm-hub-workflow-sidebar-ai-btn mod-cta"
-              onClick={() => void handleCreateWithAI()}
+              onClick={() => void handleCreateWorkflowWithAI()}
             >
               <Sparkles size={14} />
               <span>{t("workflow.createWithAI")}</span>
             </button>
+            <button
+              className="llm-hub-workflow-sidebar-ai-btn"
+              onClick={() => void handleCreateSkillWithAI()}
+            >
+              <Sparkles size={14} />
+              <span>{t("workflow.createSkillWithAI")}</span>
+            </button>
+            {createHint}
           </div>
         </div>
       </div>
@@ -1090,7 +1250,7 @@ export default function WorkflowPanel({ plugin }: WorkflowPanelProps) {
       <div className="llm-hub-workflow-sidebar">
         <div className="llm-hub-workflow-sidebar-content">
           <div className="llm-hub-workflow-empty-state">
-            <p>{t("workflow.noWorkflowInFile")}</p>
+            <p>{isSkillFile ? t("workflow.skillNoInlineWorkflow") : t("workflow.noWorkflowInFile")}</p>
             <button
               className="llm-hub-workflow-sidebar-run-btn"
               onClick={handleOpenWorkflowSelector}
@@ -1098,13 +1258,32 @@ export default function WorkflowPanel({ plugin }: WorkflowPanelProps) {
               <FolderOpen size={14} />
               <span>{t("workflowSelector.listButton")}</span>
             </button>
+            {isSkillFile && (
+              <button
+                className="llm-hub-workflow-sidebar-ai-btn mod-cta"
+                onClick={() => void handleModifySkillWithAI()}
+              >
+                <Sparkles size={14} />
+                <span>{t("workflow.modifySkillWithAI")}</span>
+              </button>
+            )}
             <button
-              className="llm-hub-workflow-sidebar-ai-btn mod-cta"
-              onClick={() => void handleCreateWithAI()}
+              className={`llm-hub-workflow-sidebar-ai-btn${isSkillFile ? "" : " mod-cta"}`}
+              onClick={() => void handleCreateWorkflowWithAI()}
             >
               <Sparkles size={14} />
               <span>{t("workflow.createWithAI")}</span>
             </button>
+            {!isSkillFile && (
+              <button
+                className="llm-hub-workflow-sidebar-ai-btn"
+                onClick={() => void handleCreateSkillWithAI()}
+              >
+                <Sparkles size={14} />
+                <span>{t("workflow.createSkillWithAI")}</span>
+              </button>
+            )}
+            {!isSkillFile && createHint}
           </div>
         </div>
       </div>
@@ -1147,12 +1326,14 @@ export default function WorkflowPanel({ plugin }: WorkflowPanelProps) {
           </button>
           <button
             className="llm-hub-workflow-sidebar-ai-btn"
-            onClick={() => void handleModifyWithAI()}
+            onClick={() => void (isSkillFile ? handleModifySkillWithAI() : handleModifyWithAI())}
             disabled={!workflowFile}
-            title={t("workflow.modifyWithAI")}
+            title={isSkillFile ? t("workflow.modifySkillWithAI") : t("workflow.modifyWithAI")}
           >
             <Sparkles size={14} />
-            <span className="llm-hub-workflow-btn-label">{t("workflow.modifyWithAI")}</span>
+            <span className="llm-hub-workflow-btn-label">
+              {isSkillFile ? t("workflow.modifySkillWithAI") : t("workflow.modifyWithAI")}
+            </span>
           </button>
         </div>
       </div>

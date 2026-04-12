@@ -14,10 +14,11 @@ import {
   type Attachment,
   type VaultToolMode,
   type ToolCall,
+  type ToolResult,
   WORKSPACE_FOLDER,
 } from "src/types";
 import { localLlmChatStream } from "src/core/localLlmProvider";
-import { getVaultTools, skillWorkflowTool } from "src/core/tools";
+import { getVaultTools, skillWorkflowTool, SKILL_WORKFLOW_TOOL_NAME } from "src/core/tools";
 import { EXECUTE_JAVASCRIPT_TOOL } from "src/core/sandboxExecutor";
 import { executeToolCall } from "src/core/toolExecutor";
 import { getRagStore } from "src/core/ragStore";
@@ -664,6 +665,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({ plugin }, ref) => {
       let stopped = false;
       let usage: Message["usage"] | undefined;
       const allToolCalls: ToolCall[] = [];
+      const allToolResults: ToolResult[] = [];
       // Stream one round from the LLM, returns collected tool calls
       const streamOneRound = async (useTools: boolean): Promise<ToolCall[]> => {
         const pendingToolCalls: ToolCall[] = [];
@@ -755,6 +757,19 @@ const Chat = forwardRef<ChatRef, ChatProps>(({ plugin }, ref) => {
             toolName: tc.name,
           };
           conversationMessages.push(toolResultMsg);
+
+          let parsedResult: unknown = result.result;
+          if (tc.name === SKILL_WORKFLOW_TOOL_NAME && typeof result.result === "string") {
+            const trimmed = result.result.trim();
+            if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+              try {
+                parsedResult = JSON.parse(trimmed);
+              } catch {
+                // keep raw string
+              }
+            }
+          }
+          allToolResults.push({ toolCallId: tc.id, result: parsedResult });
         }
 
         setStreamingContent("");
@@ -779,6 +794,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({ plugin }, ref) => {
         ragSources,
         skillsUsed: skillsUsedNames,
         toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
+        toolResults: allToolResults.length > 0 ? allToolResults : undefined,
         usage,
         elapsedMs,
       };
@@ -965,14 +981,14 @@ async function executeSkillWorkflow(
   const entry = skillWorkflowMap.get(workflowId);
   if (!entry) {
     const available = [...skillWorkflowMap.keys()].join(", ");
-    return JSON.stringify({ error: `Unknown workflow ID: ${workflowId}. Available: ${available}` });
+    return JSON.stringify({ error: `Unknown workflow ID: ${workflowId}. Available: ${available}`, workflowId });
   }
 
   const { vaultPath, workflowRef } = entry;
 
   const file = plugin.app.vault.getAbstractFileByPath(vaultPath);
   if (!(file instanceof TFile)) {
-    return JSON.stringify({ error: `Workflow file not found: ${vaultPath}` });
+    return JSON.stringify({ error: `Workflow file not found: ${vaultPath}`, workflowId, workflowPath: vaultPath });
   }
 
   const content = await plugin.app.vault.read(file);
@@ -981,7 +997,7 @@ async function executeSkillWorkflow(
   try {
     workflow = parseWorkflowFromMarkdown(content, workflowRef.name);
   } catch (e) {
-    return JSON.stringify({ error: `Failed to parse workflow: ${e instanceof Error ? e.message : String(e)}` });
+    return JSON.stringify({ error: `Failed to parse workflow: ${e instanceof Error ? e.message : String(e)}`, workflowId, workflowPath: vaultPath });
   }
 
   // Build input variables
@@ -993,7 +1009,7 @@ async function executeSkillWorkflow(
         variables.set(key, value);
       }
     } catch {
-      return JSON.stringify({ error: `Invalid variables JSON: ${variablesJson}` });
+      return JSON.stringify({ error: `Invalid variables JSON: ${variablesJson}`, workflowId, workflowPath: vaultPath });
     }
   }
 
@@ -1082,7 +1098,11 @@ async function executeSkillWorkflow(
     });
   } catch (e) {
     modal.setComplete(false);
-    return JSON.stringify({ error: `Workflow execution failed: ${e instanceof Error ? e.message : String(e)}`, workflowId });
+    return JSON.stringify({
+      error: `Workflow execution failed: ${e instanceof Error ? e.message : String(e)}. Do not retry automatically — report the error to the user and ask how to proceed.`,
+      workflowId,
+      workflowPath: vaultPath,
+    });
   } finally {
     executionModalRef = null;
   }

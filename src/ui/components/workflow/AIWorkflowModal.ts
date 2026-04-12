@@ -1,8 +1,8 @@
-import { App, Modal, Notice, parseYaml, TFile } from "obsidian";
+import { App, Modal, Notice, parseYaml, TFile, MarkdownRenderer, Component } from "obsidian";
 import type { LocalLlmHubPlugin } from "src/plugin";
 import { localLlmChatStream } from "src/core/localLlmProvider";
 import { SKILLS_FOLDER, WORKFLOWS_FOLDER, type LocalLlmConfig, type StreamChunkUsage, type Message } from "src/types";
-import { getWorkflowSpecification } from "src/workflow/workflowSpec";
+import { WORKFLOW_SPECIFICATION } from "src/workflow/workflowSpec";
 import type { SidebarNode, WorkflowNodeType, ExecutionStep } from "src/workflow/types";
 import { listWorkflowOptions, normalizeYamlText } from "src/workflow/parser";
 import { ExecutionHistoryManager } from "src/workflow/history";
@@ -10,8 +10,9 @@ import { computeLineDiff } from "./EditConfirmationModal";
 import { WorkflowGenerationModal } from "./WorkflowGenerationModal";
 import { showWorkflowPreview } from "./WorkflowPreviewModal";
 import { showExecutionHistorySelect } from "./ExecutionHistorySelectModal";
+import { ConfirmModal } from "../ConfirmModal";
 import { formatError } from "src/utils/error";
-import { t } from "src/i18n";
+import { t, getLocale } from "src/i18n";
 
 export type AIWorkflowMode = "create" | "modify";
 
@@ -42,16 +43,49 @@ export interface WorkflowConfirmResult {
   additionalRequest?: string;
 }
 
-// Confirmation modal for reviewing changes
+/** Options to tweak the AI workflow modal behaviour. */
+export interface AIWorkflowModalOptions {
+  /** When true, treat this session as a skill even without a checkbox (used for skill-focused entry points). */
+  isSkill?: boolean;
+  /** Existing skill instructions (SKILL.md body), passed when modifying a skill. */
+  existingInstructions?: string;
+}
+
+/** Context from the generation phases, shown in preview/confirm modals */
+export interface GenerationContext {
+  plan?: string;
+  thinking?: string;
+  review?: string;
+}
+
+const LOCALE_DISPLAY_NAMES: Record<string, string> = {
+  en: "English",
+  ja: "Japanese (日本語)",
+  es: "Spanish (Español)",
+  fr: "French (Français)",
+  zh: "Chinese (中文)",
+  ko: "Korean (한국어)",
+  pt: "Portuguese (Português)",
+  it: "Italian (Italiano)",
+  de: "German (Deutsch)",
+};
+
+function getLanguageName(): string {
+  return LOCALE_DISPLAY_NAMES[getLocale()] || "English";
+}
+
 class WorkflowConfirmModal extends Modal {
   private oldYaml: string;
   private newYaml: string;
   private explanation?: string;
   private previousRequest: string;
+  private generationContext: GenerationContext;
+  private isSkill: boolean;
   private resolvePromise: (result: WorkflowConfirmResult) => void;
   private additionalRequestEl: HTMLTextAreaElement | null = null;
   private additionalRequestContainerEl: HTMLElement | null = null;
   private isShowingAdditionalRequest = false;
+  private markdownComponent: Component | null = null;
 
   constructor(
     app: App,
@@ -59,6 +93,8 @@ class WorkflowConfirmModal extends Modal {
     newYaml: string,
     explanation: string | undefined,
     previousRequest: string,
+    generationContext: GenerationContext,
+    isSkill: boolean,
     resolvePromise: (result: WorkflowConfirmResult) => void
   ) {
     super(app);
@@ -66,6 +102,8 @@ class WorkflowConfirmModal extends Modal {
     this.newYaml = newYaml;
     this.explanation = explanation;
     this.previousRequest = previousRequest;
+    this.generationContext = generationContext;
+    this.isSkill = isSkill;
     this.resolvePromise = resolvePromise;
   }
 
@@ -77,7 +115,9 @@ class WorkflowConfirmModal extends Modal {
 
     // Drag handle with title
     const dragHandle = contentEl.createDiv({ cls: "modal-drag-handle" });
-    dragHandle.createEl("h2", { text: t("aiWorkflow.confirmChanges") });
+    dragHandle.createEl("h2", {
+      text: this.isSkill ? t("aiWorkflow.confirmSkillChanges") : t("aiWorkflow.confirmChanges"),
+    });
     this.setupDragHandle(dragHandle, modalEl);
 
     // Explanation section (if available)
@@ -110,6 +150,11 @@ class WorkflowConfirmModal extends Modal {
       const contentSpan = lineEl.createSpan({ cls: "llm-hub-diff-content" });
       contentSpan.textContent = line.content;
     }
+
+    this.markdownComponent = new Component();
+    this.markdownComponent.load();
+    // Diff is primary content in the confirm modal — keep plan/review collapsed.
+    renderGenerationContext(contentEl, this.generationContext, this.app, this.markdownComponent, { defaultOpen: false });
 
     // Additional request container (hidden initially)
     this.additionalRequestContainerEl = contentEl.createDiv({
@@ -218,6 +263,10 @@ class WorkflowConfirmModal extends Modal {
   }
 
   onClose(): void {
+    if (this.markdownComponent) {
+      this.markdownComponent.unload();
+      this.markdownComponent = null;
+    }
     const { contentEl } = this;
     contentEl.empty();
   }
@@ -229,10 +278,14 @@ function showWorkflowConfirmation(
   oldYaml: string,
   newYaml: string,
   explanation: string | undefined,
-  previousRequest: string
+  previousRequest: string,
+  generationContext: GenerationContext,
+  isSkill: boolean
 ): Promise<WorkflowConfirmResult> {
   return new Promise((resolve) => {
-    const modal = new WorkflowConfirmModal(app, oldYaml, newYaml, explanation, previousRequest, resolve);
+    const modal = new WorkflowConfirmModal(
+      app, oldYaml, newYaml, explanation, previousRequest, generationContext, isSkill, resolve
+    );
     modal.open();
   });
 }
@@ -248,11 +301,14 @@ export class AIWorkflowModal extends Modal {
   private mode: AIWorkflowMode;
   private existingYaml?: string;
   private existingName?: string;
+  /** When true, treat this session as a skill even without the checkbox (used for Modify/Create Skill with AI). */
+  private forceSkill = false;
+  /** Existing skill instructions (SKILL.md body), passed when modifying a skill. */
+  private existingInstructions?: string;
   private resolvePromise: (result: AIWorkflowResult | null) => void;
 
   private nameInputEl: HTMLInputElement | null = null;
   private outputPathEl: HTMLInputElement | null = null;
-  private skillCheckbox: HTMLInputElement | null = null;
   private descriptionEl: HTMLTextAreaElement | null = null;
   private confirmCheckbox: HTMLInputElement | null = null;
   private generateBtn: HTMLButtonElement | null = null;
@@ -298,7 +354,8 @@ export class AIWorkflowModal extends Modal {
     resolvePromise: (result: AIWorkflowResult | null) => void,
     existingYaml?: string,
     existingName?: string,
-    defaultOutputPath?: string
+    defaultOutputPath?: string,
+    options?: AIWorkflowModalOptions
   ) {
     super(app);
     this.plugin = plugin;
@@ -307,6 +364,8 @@ export class AIWorkflowModal extends Modal {
     this.existingName = existingName;
     this.resolvePromise = resolvePromise;
     this.defaultOutputPath = defaultOutputPath;
+    this.forceSkill = options?.isSkill ?? false;
+    this.existingInstructions = options?.existingInstructions;
   }
 
   onOpen(): void {
@@ -319,67 +378,61 @@ export class AIWorkflowModal extends Modal {
     const dragHandle = contentEl.createDiv({ cls: "modal-drag-handle" });
     const title =
       this.mode === "create"
-        ? t("aiWorkflow.createTitle")
-        : t("aiWorkflow.modifyTitle");
+        ? this.forceSkill
+          ? t("aiWorkflow.createSkillTitle")
+          : t("aiWorkflow.createTitle")
+        : this.forceSkill
+          ? t("aiWorkflow.modifySkillTitle")
+          : t("aiWorkflow.modifyTitle");
     dragHandle.createEl("h2", { text: title });
     this.setupDrag(dragHandle, modalEl);
 
     // Add resize handles
     this.addResizeHandles(modalEl);
 
-    // Name and output path (only for create mode)
     if (this.mode === "create") {
-      // Name input
       const nameContainer = contentEl.createDiv({ cls: "llm-hub-workflow-input-row" });
-      nameContainer.createEl("label", { text: t("aiWorkflow.workflowName") });
+      nameContainer.createEl("label", {
+        text: this.forceSkill ? t("aiWorkflow.skillName") : t("aiWorkflow.workflowName"),
+      });
       this.nameInputEl = nameContainer.createEl("input", {
         type: "text",
         cls: "llm-hub-workflow-name-input",
-        attr: { placeholder: t("aiWorkflow.namePlaceholder") },
+        attr: {
+          placeholder: this.forceSkill
+            ? t("aiWorkflow.skillNamePlaceholder")
+            : t("aiWorkflow.namePlaceholder"),
+        },
       });
 
-      // Output path input
+      // Skill output path is locked to SKILLS_FOLDER — skills are addressed by folder name
+      // so the generator shouldn't be able to drop them elsewhere.
       const pathContainer = contentEl.createDiv({ cls: "llm-hub-workflow-input-row" });
       pathContainer.createEl("label", { text: t("aiWorkflow.outputPath") });
-      const defaultPath = this.defaultOutputPath || `${WORKFLOWS_FOLDER}/{{name}}`;
+      const defaultPath = this.forceSkill
+        ? `${SKILLS_FOLDER}/{{name}}`
+        : this.defaultOutputPath || `${WORKFLOWS_FOLDER}/{{name}}`;
       this.outputPathEl = pathContainer.createEl("input", {
         type: "text",
         cls: "llm-hub-workflow-path-input",
         value: defaultPath,
         attr: { placeholder: `${WORKFLOWS_FOLDER}/{{name}}` },
       });
+      if (this.forceSkill) {
+        this.outputPathEl.disabled = true;
+      }
       pathContainer.createEl("div", {
         cls: "llm-hub-workflow-hint",
         text: t("aiWorkflow.pathHint"),
       });
 
-      // Create as skill checkbox
-      const skillContainer = contentEl.createDiv({ cls: "llm-hub-workflow-confirm-row" });
-      this.skillCheckbox = skillContainer.createEl("input", {
-        type: "checkbox",
-        attr: { id: "ai-workflow-skill-checkbox" },
-      });
-      skillContainer.createEl("label", {
-        text: t("aiWorkflow.createAsSkill"),
-        attr: { for: "ai-workflow-skill-checkbox" },
-      });
-
-      this.skillCheckbox.addEventListener("change", () => {
-        if (!this.outputPathEl) return;
-        if (this.skillCheckbox?.checked) {
-          this.outputPathEl.value = `${SKILLS_FOLDER}/{{name}}`;
-          this.outputPathEl.disabled = true;
-        } else {
-          this.outputPathEl.value = this.defaultOutputPath || `${WORKFLOWS_FOLDER}/{{name}}`;
-          this.outputPathEl.disabled = false;
-        }
-      });
     }
 
-    // Description label
     const descLabel =
       this.mode === "create"
-        ? t("aiWorkflow.describeCreate")
+        ? this.forceSkill
+          ? t("aiWorkflow.describeCreateSkill")
+          : t("aiWorkflow.describeCreate")
         : t("aiWorkflow.describeModify");
 
     contentEl.createEl("label", {
@@ -401,7 +454,9 @@ export class AIWorkflowModal extends Modal {
       attr: {
         placeholder:
           this.mode === "create"
-            ? t("aiWorkflow.placeholderCreate")
+            ? this.forceSkill
+              ? t("aiWorkflow.placeholderCreateSkill")
+              : t("aiWorkflow.placeholderCreate")
             : t("aiWorkflow.placeholderModify"),
         rows: "6",
       },
@@ -612,7 +667,7 @@ export class AIWorkflowModal extends Modal {
     this.cachedResolvedDescription = resolved;
     this.cachedResolvedMentions = mentions;
 
-    const isSkill = this.skillCheckbox?.checked || false;
+    const isSkill = this.forceSkill;
     const systemPrompt = this.buildSystemPrompt(true, isSkill);
     const userPrompt = this.buildUserPrompt(
       resolved,
@@ -628,8 +683,10 @@ export class AIWorkflowModal extends Modal {
     // Copy to clipboard
     await navigator.clipboard.writeText(fullPrompt);
 
-    // Show paste response section
+    // Show paste response section, scroll it into view, and focus the textarea
     this.pasteSectionEl?.removeClass("is-hidden");
+    this.pasteSectionEl?.scrollIntoView({ behavior: "smooth", block: "end" });
+    setTimeout(() => this.pasteTextareaEl?.focus(), 100);
 
     new Notice(t("aiWorkflow.promptCopied"));
   }
@@ -664,7 +721,7 @@ export class AIWorkflowModal extends Modal {
       : undefined;
 
     if (this.mode === "create") {
-      const isSkill = this.skillCheckbox?.checked || false;
+      const isSkill = this.forceSkill;
 
       // Create mode: save markdown directly (validate it has workflow blocks)
       const options = listWorkflowOptions(pastedText);
@@ -801,7 +858,11 @@ export class AIWorkflowModal extends Modal {
   }
 
   /**
-   * Run the generation loop with progress display and preview confirmation
+   * Run the generation loop with progress display and preview confirmation.
+   * Runs three phases:
+   *   1. Planning - produces a plain-language plan before generation (first creation only)
+   *   2. Generation - creates the workflow YAML using the plan as context
+   *   3. Review - critiques the output; user can accept, refine, or cancel
    */
   private async runGenerationLoop(
     currentRequest: string,
@@ -819,6 +880,10 @@ export class AIWorkflowModal extends Modal {
     const abortController = new AbortController();
     let generationCancelled = false;
 
+    // Planning runs on first creation only (not on user-requested revisions
+    // or modifications to existing workflows); review always runs.
+    const shouldPlan = requestHistory.length === 0 && !this.existingYaml;
+
     // Open the generation modal
     const generationModal = new WorkflowGenerationModal(
       this.app,
@@ -826,75 +891,212 @@ export class AIWorkflowModal extends Modal {
       abortController,
       () => { generationCancelled = true; },
       selectedExecutionSteps?.length ?? 0,
-      modelDisplayName
+      modelDisplayName,
+      shouldPlan
     );
     generationModal.open();
 
     try {
-      // Build prompts
-      const isSkill = this.skillCheckbox?.checked || false;
-      const systemPrompt = this.buildSystemPrompt(false, isSkill);
-      const userPrompt = this.buildUserPrompt(currentRequest, workflowName, previousYaml, requestHistory, selectedExecutionSteps, isSkill);
-
-      let response = "";
-
-      // Use local LLM provider for streaming generation
+      const isSkill = this.forceSkill;
       const config: LocalLlmConfig = {
         ...this.plugin.settings.llmConfig,
       };
-      const messages: Message[] = [{
+
+      const isCancelled = () => generationCancelled || abortController.signal.aborted;
+
+      let totalUsage: StreamChunkUsage | undefined;
+      const apiStartTime = Date.now();
+
+      let plan: string | undefined;
+      if (shouldPlan) {
+        let planRequest = currentRequest;
+        while (true) {
+          generationModal.setPhase("planning");
+          const planResult = await this.runPlanningPhase(
+            config, planRequest, workflowName, isSkill,
+            generationModal, abortController.signal, isCancelled
+          );
+          plan = planResult.plan;
+          totalUsage = mergeUsage(totalUsage, planResult.usage);
+          if (isCancelled()) {
+            generationModal.close();
+            this.resolvePromise(null);
+            return;
+          }
+
+          const confirm = await generationModal.showPlanConfirmation();
+          if (confirm.action === "cancel") {
+            generationModal.close();
+            this.resolvePromise(null);
+            return;
+          }
+          if (confirm.action === "ok") {
+            break;
+          }
+          planRequest = `${currentRequest}\n\nFeedback on previous plan:\n${confirm.feedback}`;
+          generationModal.resetForReplan();
+        }
+      }
+
+      generationModal.appendThinkingSeparator(t("workflow.generation.phaseGenerate"));
+      generationModal.setPhase("generating");
+
+      const systemPrompt = this.buildSystemPrompt(false, isSkill);
+      const userPrompt = this.buildUserPrompt(
+        currentRequest, workflowName, previousYaml, requestHistory,
+        selectedExecutionSteps, isSkill, plan
+      );
+
+      let response = "";
+      const genMessages: Message[] = [{
         role: "user",
         content: userPrompt,
         timestamp: Date.now(),
       }];
-      let streamUsage: StreamChunkUsage | undefined;
-      const startTime = Date.now();
+
       for await (const chunk of localLlmChatStream(
-        config, messages, systemPrompt, abortController.signal
+        config, genMessages, systemPrompt, abortController.signal
       )) {
-        if (generationCancelled || abortController.signal.aborted) break;
+        if (isCancelled()) break;
         if (chunk.type === "thinking" && chunk.content) {
           generationModal.appendThinking(chunk.content);
         } else if (chunk.type === "text" && chunk.content) {
           response += chunk.content;
         } else if (chunk.type === "done") {
-          streamUsage = chunk.usage;
+          totalUsage = mergeUsage(totalUsage, chunk.usage);
         } else if (chunk.type === "error") {
           throw new Error(chunk.error || "Unknown error");
         }
       }
-      const elapsedMs = Date.now() - startTime;
-      generationModal.setComplete();
 
-      // Close generation modal
-      generationModal.close();
-
-      // Show usage as Notice
-      const usageNotice = WorkflowGenerationModal.formatUsageNotice(streamUsage, elapsedMs);
-      if (usageNotice && !generationCancelled) {
-        new Notice(usageNotice);
-      }
-
-      // Check if cancelled
-      if (generationCancelled) {
+      if (isCancelled()) {
+        generationModal.close();
         this.resolvePromise(null);
         return;
       }
 
       // Parse the response
-      const result = this.parseResponse(response);
+      let result = this.parseResponse(response);
 
       if (!result) {
+        generationModal.close();
         new Notice(t("workflow.generation.parseFailed"));
         this.resolvePromise(null);
         return;
+      }
+
+      let critiqueResult: ReviewResult | undefined;
+      let reviewIteration = 0;
+      while (true) {
+        if (reviewIteration === 0) {
+          generationModal.appendThinkingSeparator(t("workflow.generation.phaseReview"));
+          generationModal.setPhase("reviewing");
+        } else {
+          generationModal.resetReviewForIteration();
+          generationModal.appendThinkingSeparator(t("workflow.generation.phaseReview"));
+        }
+        reviewIteration++;
+
+        const reviewResult = await this.runReviewPhase(
+          config, currentRequest, plan || "", result.yaml, isSkill,
+          generationModal, abortController.signal, isCancelled
+        );
+        critiqueResult = reviewResult.review;
+        totalUsage = mergeUsage(totalUsage, reviewResult.usage);
+
+        if (critiqueResult) {
+          generationModal.renderReviewAsMarkdown(formatReviewAsMarkdown(critiqueResult));
+        }
+
+        if (isCancelled()) {
+          generationModal.close();
+          this.resolvePromise(null);
+          return;
+        }
+
+        // No issues at all — skip the confirmation UI and proceed automatically.
+        if (critiqueResult && critiqueResult.issues.length === 0) {
+          generationModal.setStatus(t("workflow.generation.reviewApproved"));
+          break;
+        }
+
+        // Issues present (or review couldn't be parsed) — let the user decide:
+        // accept / refine / cancel. Inner loop so that if the user tries to
+        // accept but then cancels the "are you sure?" confirm dialog, we re-show
+        // the review confirmation without re-running the (expensive) review phase.
+        let reviewAction: "ok" | "refine" | "cancel" | null = null;
+        while (reviewAction === null) {
+          const reviewConfirm = await generationModal.showReviewConfirmation();
+          if (reviewConfirm.action === "cancel" || reviewConfirm.action === "refine") {
+            reviewAction = reviewConfirm.action;
+            break;
+          }
+          // Explicit confirm when issues were flagged — avoid accidental accept.
+          const confirmed = await new ConfirmModal(
+            this.app,
+            t("workflow.generation.acceptWithIssuesConfirm"),
+          ).openAndWait();
+          if (confirmed) reviewAction = "ok";
+        }
+        if (reviewAction === "cancel") {
+          generationModal.close();
+          this.resolvePromise(null);
+          return;
+        }
+        if (reviewAction === "ok") break;
+
+        // Refine: run another generation pass using the review issues as
+        // feedback, then loop back to re-review the refined result.
+        if (!critiqueResult) {
+          // No critique to drive refinement — avoid an infinite loop.
+          break;
+        }
+        generationModal.beginRefining(t("workflow.generation.reviewRefining"));
+        generationModal.appendThinkingSeparator(t("workflow.generation.reviewRefining"));
+        const refinement = await this.runRefinementPass(
+          config, currentRequest, plan || "", result.yaml, result.explanation,
+          critiqueResult, systemPrompt, isSkill, generationModal, abortController.signal, isCancelled
+        );
+        totalUsage = mergeUsage(totalUsage, refinement.usage);
+
+        if (isCancelled()) {
+          generationModal.close();
+          this.resolvePromise(null);
+          return;
+        }
+
+        if (refinement.response) {
+          const refinedResult = this.parseResponse(refinement.response);
+          if (refinedResult) result = refinedResult;
+        }
+      }
+
+
+      const reviewDisplay = critiqueResult
+        ? formatReviewAsMarkdown(critiqueResult)
+        : generationModal.getReviewText() || undefined;
+
+      const generationContext: GenerationContext = {
+        plan: plan || undefined,
+        thinking: generationModal.getThinkingText() || undefined,
+        review: reviewDisplay || undefined,
+      };
+
+      const apiElapsedMs = Date.now() - apiStartTime;
+      generationModal.setComplete();
+      generationModal.close();
+
+      // Show usage as Notice
+      const apiNotice = WorkflowGenerationModal.formatUsageNotice(totalUsage, apiElapsedMs);
+      if (apiNotice) {
+        new Notice(apiNotice);
       }
 
       // Add metadata to result - only store current request as description
       result.description = currentRequest;
       result.mode = this.mode;
       result.resolvedMentions = resolvedMentions.length > 0 ? resolvedMentions : undefined;
-      if (this.skillCheckbox?.checked) {
+      if (this.forceSkill) {
         result.createAsSkill = true;
         // Extract skill instructions from explanation (text before YAML, strip trailing ---)
         if (result.explanation) {
@@ -922,7 +1124,9 @@ export class AIWorkflowModal extends Modal {
           this.existingYaml!,
           result.yaml,
           result.explanation,
-          currentRequest
+          currentRequest,
+          generationContext,
+          this.forceSkill
         );
 
         if (confirmResult.result === "ok") {
@@ -955,7 +1159,8 @@ export class AIWorkflowModal extends Modal {
         result.yaml,
         result.nodes,
         result.name,
-        currentRequest
+        currentRequest,
+        generationContext
       );
 
       if (previewResult.result === "ok") {
@@ -987,9 +1192,270 @@ export class AIWorkflowModal extends Modal {
     }
   }
 
+  /**
+   * Phase 1: Planning - produce a plain-language plan before generation.
+   * Returns the plan text, or undefined if planning fails (non-fatal).
+   */
+  private async runPlanningPhase(
+    config: LocalLlmConfig,
+    currentRequest: string,
+    workflowName: string,
+    isSkill: boolean,
+    generationModal: WorkflowGenerationModal,
+    signal: AbortSignal,
+    isCancelled: () => boolean
+  ): Promise<{ plan?: string; usage?: StreamChunkUsage }> {
+    const languageName = getLanguageName();
+
+    const skillGuidance = isSkill
+      ? `
+
+For skills (reusable tools the AI assistant can trigger), also cover:
+- When this skill should activate (what the user might say or ask)
+- What input the user provides
+- What the skill produces as output`
+      : "";
+
+    const planSystemPrompt = `You help users plan what their Obsidian automation should do. Write the plan so anyone can understand it — NOT just engineers.
+
+Describe the plan in plain language covering:
+1. **What it does** — The goal in one or two sentences
+2. **Steps** — What happens, in order, as numbered bullet points (e.g., "Ask the user for a topic", "Search the vault for related notes", "Show the results")
+3. **Inputs** — What information is needed from the user or environment
+4. **Outputs** — What the user gets when it finishes
+5. **Things to watch out for** — Potential issues in plain language (e.g., "What if no notes are found?")
+${skillGuidance}
+
+IMPORTANT RULES:
+- Write the ENTIRE plan in ${languageName}.
+- Avoid technical jargon. Do NOT mention node types, YAML, variable names, or implementation details.
+- Use simple sentences a non-engineer could follow.
+- Keep it concise — roughly 10–20 short bullet points total.
+- Do NOT generate any code or YAML.`;
+
+    const entityType = isSkill ? "skill" : "workflow";
+    const existingContext = this.existingYaml
+      ? `\n\nEXISTING WORKFLOW TO MODIFY:\n${this.existingYaml}`
+      : "";
+    const planUserPrompt = `Plan a ${entityType} named "${workflowName}" that does the following:
+
+${currentRequest}${existingContext}`;
+
+    try {
+      let plan = "";
+      let usage: StreamChunkUsage | undefined;
+      const messages: Message[] = [{
+        role: "user",
+        content: planUserPrompt,
+        timestamp: Date.now(),
+      }];
+      for await (const chunk of localLlmChatStream(
+        config, messages, planSystemPrompt, signal
+      )) {
+        if (isCancelled()) return {};
+
+        if (chunk.type === "thinking" && chunk.content) {
+          generationModal.appendThinking(chunk.content);
+        } else if (chunk.type === "text" && chunk.content) {
+          plan += chunk.content;
+          generationModal.appendPlan(chunk.content);
+        } else if (chunk.type === "done") {
+          usage = chunk.usage;
+        } else if (chunk.type === "error") {
+          console.warn("Planning phase error:", chunk.error);
+          return {}; // Non-fatal: proceed without plan
+        }
+      }
+      return { plan: plan || undefined, usage };
+    } catch (error) {
+      console.warn("Planning phase failed, proceeding without plan:", formatError(error));
+      return {};
+    }
+  }
+
+  /**
+   * Phase 3: Review - critique the generated workflow and return structured feedback.
+   */
+  private async runReviewPhase(
+    config: LocalLlmConfig,
+    currentRequest: string,
+    plan: string,
+    generatedYaml: string,
+    isSkill: boolean,
+    generationModal: WorkflowGenerationModal,
+    signal: AbortSignal,
+    isCancelled: () => boolean
+  ): Promise<{ review?: ReviewResult; usage?: StreamChunkUsage }> {
+    const workflowSpec = WORKFLOW_SPECIFICATION;
+    const languageName = getLanguageName();
+
+    const skillReviewChecks = isSkill
+      ? `
+5. **Skill instructions quality**: Are instructions written in imperative form? Do they explain WHY behind each guideline (not just rigid rules)? Are they concise (under 500 lines)?
+6. **Skill description**: Does the description specify both what the skill does AND when to use it? Is it specific enough to trigger reliably?
+7. **Input/output design**: Does the workflow have clear input variables for the AI to provide? Are outputs meaningful for continuing the conversation?`
+      : "";
+
+    const reviewSystemPrompt = `You are a workflow quality reviewer for Obsidian. Evaluate the generated workflow YAML against the original request and plan.
+
+Check for:
+1. **Completeness**: Does the workflow fulfill all aspects of the request?
+2. **Correctness**: Are node types valid? Are connections (next, trueNext, falseNext) properly set? Are variables initialized before use? NOTE: The \`value\` field on a variable node is OPTIONAL — omitting it defaults to "" for new variables and preserves the existing value for variables already set (input declaration). Do NOT flag missing \`value\` as an issue; only flag real problems (wrong type, broken references, undefined variables being read, etc.).
+   IMPORTANT: Do NOT flag "workflow does not output variable X to chat" as an issue. When a skill workflow runs, ALL variables whose name does not start with \`_\` are automatically returned to the chat AI, which presents them to the user as guided by the SKILL.md instructions. A final \`command\` node just to "display" a value is UNNECESSARY — a \`command\` node runs an LLM call inside the workflow and saves to a variable; it does not write directly to the chat. If the concern is that the user should see a specific variable, the fix belongs in the SKILL.md instructions body (e.g., "output \`ogpMarkdown\` verbatim"), not in the workflow YAML.
+3. **Data flow**: Do saveTo variables match where they're referenced? Are there dangling references?
+4. **Best practices**: Descriptive node IDs? Comments on complex nodes? Proper error handling?
+5. **Variable interpolation in script nodes**: \`{{var:json}}\` does NOT add quotes — it only escapes content. Flag any occurrence where \`{{var:json}}\` appears without surrounding quotes in a JavaScript string context (e.g., \`var x = {{var:json}}\`, \`JSON.parse({{var:json}})\`). The correct form is \`"{{var:json}}"\` when the value should be a string literal.
+6. **json node source**: The \`source\` field must be a bare variable name (no \`{{...}}\`, no surrounding quotes, no wrapping like \`"[{{var}}]"\`). Flag any \`source\` that uses interpolation or wrapping.${skillReviewChecks}
+
+WORKFLOW SPECIFICATION (for reference):
+${workflowSpec}
+
+Output your review as JSON (no markdown code fences):
+{
+  "verdict": "pass" or "fail",
+  "summary": "Brief overall assessment",
+  "issues": [
+    {
+      "severity": "high" or "medium" or "low",
+      "description": "Description of the issue"
+    }
+  ]
+}
+
+IMPORTANT:
+- Write the "summary" and every issue "description" in ${languageName}.
+- Use plain, non-technical language a non-engineer can understand (avoid jargon like node types, YAML field names, or variable references unless absolutely necessary).
+- The JSON keys themselves ("verdict", "summary", "issues", "severity", "description") must remain in English.
+- "high" severity: The workflow will fail or produce wrong results (missing variables, invalid node types, broken connections).
+- "medium"/"low" severity: Quality improvements, not critical.
+- Set verdict to "fail" only if there are "high" severity issues.
+- If the workflow looks correct, return verdict "pass" with an empty issues array.`;
+
+    const entityType = isSkill ? "skill" : "workflow";
+    const planSection = plan ? `\nPLAN:\n${plan}\n` : "";
+    const reviewUserPrompt = `Review this generated ${entityType}:
+
+ORIGINAL REQUEST:
+${currentRequest}
+${planSection}
+GENERATED YAML:
+${generatedYaml}`;
+
+    try {
+      let reviewText = "";
+      let usage: StreamChunkUsage | undefined;
+      const messages: Message[] = [{
+        role: "user",
+        content: reviewUserPrompt,
+        timestamp: Date.now(),
+      }];
+      for await (const chunk of localLlmChatStream(
+        config, messages, reviewSystemPrompt, signal
+      )) {
+        if (isCancelled()) return {};
+
+        if (chunk.type === "thinking" && chunk.content) {
+          generationModal.appendThinking(chunk.content);
+        } else if (chunk.type === "text" && chunk.content) {
+          reviewText += chunk.content;
+          generationModal.appendReview(chunk.content);
+        } else if (chunk.type === "done") {
+          usage = chunk.usage;
+        } else if (chunk.type === "error") {
+          console.warn("Review phase error:", chunk.error);
+          return {};
+        }
+      }
+      return { review: parseReviewResponse(reviewText), usage };
+    } catch (error) {
+      console.warn("Review phase failed, proceeding without review:", formatError(error));
+      return {};
+    }
+  }
+
+  /**
+   * Auto-refinement pass: regenerate the workflow using review feedback.
+   * Returns the raw response text, or undefined if refinement fails.
+   */
+  private async runRefinementPass(
+    config: LocalLlmConfig,
+    currentRequest: string,
+    plan: string,
+    previousYaml: string,
+    previousExplanation: string | undefined,
+    review: ReviewResult,
+    systemPrompt: string,
+    isSkill: boolean,
+    generationModal: WorkflowGenerationModal,
+    signal: AbortSignal,
+    isCancelled: () => boolean
+  ): Promise<{ response?: string; usage?: StreamChunkUsage }> {
+    const issuesText = review.issues
+      .map(i => `- [${i.severity}] ${i.description}`)
+      .join("\n");
+
+    const planSection = plan ? `\nPLAN:\n${plan}\n` : "";
+
+    let generatedOutput: string;
+    let outputInstruction: string;
+    if (isSkill && previousExplanation) {
+      generatedOutput = `GENERATED SKILL.md INSTRUCTIONS:\n${previousExplanation}\n\nGENERATED YAML:\n${previousYaml}`;
+      outputInstruction = `Fix all high-severity issues. Output the corrected SKILL.md instructions body first, then a line containing only "---", then the corrected complete YAML starting with "name:".`;
+    } else {
+      generatedOutput = `GENERATED YAML:\n${previousYaml}`;
+      outputInstruction = `Fix all high-severity issues and output the corrected complete YAML, starting with "name:".`;
+    }
+
+    // When the reviewer produced unparseable JSON, include the full raw text
+    // so the refinement model gets all the context rather than a truncated summary.
+    const feedbackSection = review.rawText
+      ? `REVIEW FEEDBACK (raw):\n${review.rawText}`
+      : `REVIEW FEEDBACK:\n${review.summary}\n${issuesText}`;
+
+    const refinementPrompt = `The following ${isSkill ? "skill" : "workflow"} was generated but the reviewer found issues that must be fixed:
+
+ORIGINAL REQUEST:
+${currentRequest}
+${planSection}
+${generatedOutput}
+
+${feedbackSection}
+
+${outputInstruction}`;
+
+    try {
+      let response = "";
+      let usage: StreamChunkUsage | undefined;
+      const messages: Message[] = [{
+        role: "user",
+        content: refinementPrompt,
+        timestamp: Date.now(),
+      }];
+      for await (const chunk of localLlmChatStream(
+        config, messages, systemPrompt, signal
+      )) {
+        if (isCancelled()) return {};
+
+        if (chunk.type === "thinking" && chunk.content) {
+          generationModal.appendThinking(chunk.content);
+        } else if (chunk.type === "text" && chunk.content) {
+          response += chunk.content;
+        } else if (chunk.type === "done") {
+          usage = chunk.usage;
+        } else if (chunk.type === "error") {
+          console.warn("Refinement pass error:", chunk.error);
+          return {};
+        }
+      }
+      return { response: response || undefined, usage };
+    } catch (error) {
+      console.warn("Refinement pass failed, using original generation:", formatError(error));
+      return {};
+    }
+  }
+
   private buildSystemPrompt(outputAsMarkdown = false, isSkill = false): string {
-    // Build dynamic workflow specification with current settings
-    const workflowSpec = getWorkflowSpecification();
+    const workflowSpec = WORKFLOW_SPECIFICATION;
 
     const skillSpec = isSkill
       ? `
@@ -999,24 +1465,36 @@ export class AIWorkflowModal extends Modal {
 When creating a skill, generate TWO components:
 
 ### 1. SKILL.md Instructions
-The body text that guides the AI assistant when this skill is activated in chat. Include:
-- Role description (e.g., "You are a code review assistant")
-- Step-by-step behavioral guidelines
-- Rules and constraints for the AI to follow
-- When and how to use the workflow
+The body text that guides the AI assistant when this skill is activated in chat.
+
+**Writing principles:**
+- Use imperative form for instructions
+- Explain the WHY behind each instruction rather than heavy-handed MUSTs — the AI is smart and responds better to understanding purpose than rigid rules
+- Keep instructions concise (aim for under 500 lines)
+- Include concrete examples with Input/Output format where helpful
+- Define output formats explicitly when the skill produces structured results
+
+**What to include:**
+- Role description with clear persona (e.g., "You are a code review assistant specializing in...")
+- Step-by-step behavioral guidelines explaining the reasoning behind each step
+- When and how to invoke the workflow, including what input variables to provide
+- Edge cases and how to handle them
 
 Example:
 \`\`\`
 You are a code review assistant. When reviewing code:
 
-1. Check for common bugs and anti-patterns
-2. Suggest improvements for readability
-3. Verify error handling is adequate
-4. Use the workflow to run linting checks
+1. Check for common bugs and anti-patterns — these are the most impactful issues to catch early
+2. Suggest improvements for readability, because code is read far more often than written
+3. Verify error handling is adequate for production use
+4. Use the workflow to run automated checks, passing the file path as the "target" variable
+
+When the user shares code without explicit review requests, still offer brief observations about potential issues. This proactive approach helps catch problems before they grow.
 \`\`\`
 
 ### 2. Workflow
 An executable workflow in YAML format that the skill provides as a tool.
+The workflow should have clear input variables that the AI will provide when calling run_skill_workflow, and meaningful output variables the AI can use to continue the conversation.
 `
       : "";
 
@@ -1075,8 +1553,16 @@ ${outputRules}`;
     previousYaml?: string,
     requestHistory: string[] = [],
     selectedExecutionSteps?: ExecutionStep[],
-    isSkill = false
+    isSkill = false,
+    plan?: string
   ): string {
+    // Build plan section if available. The plan is written in plain language
+    // (possibly in a non-English language) and describes WHAT the workflow should
+    // do from the user's perspective — translate it into concrete workflow nodes.
+    const planSection = plan
+      ? `\nUSER-APPROVED PLAN (plain-language description of the desired behavior):\n${plan}\n\nTranslate this plan into concrete workflow nodes. The plan describes WHAT the workflow should do; you decide HOW (which nodes, variables, and connections to use).\n`
+      : "";
+
     if (this.mode === "create") {
       const entityType = isSkill ? "skill" : "workflow";
 
@@ -1102,7 +1588,7 @@ ${historySection}
 
 Previous output:
 ${previousYaml}
-${executionSection}
+${executionSection}${planSection}
 NEW REQUEST:
 ${currentRequest}
 
@@ -1116,7 +1602,7 @@ ${completeOutputInstruction}`;
       return `Create a new ${entityType} named "${workflowName}" that does the following:
 
 ${currentRequest}
-
+${planSection}
 ${outputInstruction}`;
     } else {
       // Build execution history section if steps are selected
@@ -1125,11 +1611,26 @@ ${outputInstruction}`;
         executionSection = this.formatExecutionSteps(selectedExecutionSteps);
       }
 
+      if (isSkill) {
+        const instructionsSection = this.existingInstructions
+          ? `\nCURRENT SKILL.md INSTRUCTIONS:\n${this.existingInstructions}\n`
+          : "";
+        return `Modify the following skill according to these requirements. The skill consists of SKILL.md instructions (persona/behavioral guidelines for the AI) AND an executable workflow YAML.
+${instructionsSection}
+CURRENT WORKFLOW YAML:
+${this.existingYaml}
+${executionSection}${planSection}
+MODIFICATIONS REQUESTED:
+${currentRequest}
+
+Output the modified SKILL.md instructions body first, then a line containing only "---", then the modified complete YAML starting with "name:".`;
+      }
+
       return `Modify the following workflow according to these requirements:
 
 CURRENT WORKFLOW:
 ${this.existingYaml}
-${executionSection}
+${executionSection}${planSection}
 MODIFICATIONS REQUESTED:
 ${currentRequest}
 
@@ -1545,7 +2046,8 @@ export function promptForAIWorkflow(
   mode: AIWorkflowMode,
   existingYaml?: string,
   existingName?: string,
-  defaultOutputPath?: string
+  defaultOutputPath?: string,
+  options?: AIWorkflowModalOptions
 ): Promise<AIWorkflowResult | null> {
   return new Promise((resolve) => {
     const modal = new AIWorkflowModal(
@@ -1555,7 +2057,8 @@ export function promptForAIWorkflow(
       resolve,
       existingYaml,
       existingName,
-      defaultOutputPath
+      defaultOutputPath,
+      options
     );
     modal.open();
   });
@@ -1681,5 +2184,165 @@ export function parseWorkflowResponse(response: string): AIWorkflowResult | null
   } catch (error) {
     console.error("Failed to parse AI workflow response:", formatError(error), response);
     return null;
+  }
+}
+
+/** Render generation context (plan/thinking/review) as collapsible details sections.
+ *  The plan and review sections are rendered as Markdown; thinking kept as preformatted text. */
+export function renderGenerationContext(
+  container: HTMLElement,
+  ctx: GenerationContext,
+  app: App,
+  component: Component,
+  options?: { defaultOpen?: boolean }
+): void {
+  const sections: { label: string; content: string; kind: "markdown" | "text" }[] = [];
+  if (ctx.plan) sections.push({ label: t("workflow.generation.phasePlan"), content: ctx.plan, kind: "markdown" });
+  if (ctx.review) sections.push({ label: t("workflow.generation.phaseReview"), content: ctx.review, kind: "markdown" });
+  if (ctx.thinking) sections.push({ label: t("workflow.generation.thinking"), content: ctx.thinking, kind: "text" });
+
+  if (sections.length === 0) return;
+
+  const defaultOpen = options?.defaultOpen ?? true;
+  const wrapper = container.createDiv({ cls: "llm-hub-workflow-generation-context" });
+  for (const section of sections) {
+    const details = wrapper.createEl("details", { cls: "llm-hub-workflow-generation-context-details" });
+    // Open plan/review by default when they're the primary content (preview modal).
+    // Keep them closed in contexts where the diff is primary (confirm modal).
+    if (defaultOpen && section.kind === "markdown") details.setAttr("open", "");
+    const summary = details.createEl("summary");
+    summary.createSpan({ text: section.label });
+    const copyBtn = summary.createEl("button", {
+      cls: "llm-hub-workflow-generation-copy-btn",
+      text: t("message.copy"),
+    });
+    copyBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      void navigator.clipboard.writeText(section.content).then(() => {
+        const original = copyBtn.textContent;
+        copyBtn.textContent = "✓";
+        setTimeout(() => { copyBtn.textContent = original; }, 1200);
+      });
+    });
+    if (section.kind === "markdown") {
+      const mdContainer = details.createDiv({ cls: "llm-hub-workflow-generation-context-content llm-hub-workflow-generation-plan-rendered" });
+      void MarkdownRenderer.render(app, section.content, mdContainer, "/", component);
+      continue;
+    }
+    const pre = details.createEl("pre", { cls: "llm-hub-workflow-generation-context-content" });
+    pre.textContent = section.content;
+  }
+}
+
+/** Merge multiple StreamChunkUsage objects by summing their numeric fields */
+function mergeUsage(a?: StreamChunkUsage, b?: StreamChunkUsage): StreamChunkUsage | undefined {
+  if (!a) return b;
+  if (!b) return a;
+  return {
+    inputTokens: (a.inputTokens ?? 0) + (b.inputTokens ?? 0),
+    outputTokens: (a.outputTokens ?? 0) + (b.outputTokens ?? 0),
+    thinkingTokens: (a.thinkingTokens ?? 0) + (b.thinkingTokens ?? 0),
+    totalTokens: (a.totalTokens ?? 0) + (b.totalTokens ?? 0),
+  };
+}
+
+/** Structured result from the review phase */
+export interface ReviewResult {
+  verdict: "pass" | "fail";
+  summary: string;
+  issues: Array<{
+    severity: "high" | "medium" | "low";
+    description: string;
+  }>;
+  /** Raw reviewer text preserved when JSON parsing fails, so refinement gets full context */
+  rawText?: string;
+}
+
+/**
+ * Format a ReviewResult as localized Markdown for human-readable display.
+ */
+export function formatReviewAsMarkdown(review: ReviewResult): string {
+  const severityLabel: Record<string, string> = {
+    high: t("workflow.generation.severityHigh"),
+    medium: t("workflow.generation.severityMedium"),
+    low: t("workflow.generation.severityLow"),
+  };
+  const severityIcon: Record<string, string> = {
+    high: "🔴",
+    medium: "🟡",
+    low: "🔵",
+  };
+
+  const verdictIcon = review.verdict === "pass" ? "✅" : "⚠️";
+  const verdictLabel = review.verdict === "pass"
+    ? t("workflow.generation.reviewVerdictPass")
+    : t("workflow.generation.reviewVerdictFail");
+
+  const lines: string[] = [];
+  lines.push(`## ${verdictIcon} ${verdictLabel}`);
+  if (review.summary) {
+    lines.push("");
+    lines.push(review.summary);
+  }
+
+  if (review.issues.length > 0) {
+    lines.push("");
+    lines.push(`### ${t("workflow.generation.reviewIssues")} (${review.issues.length})`);
+    lines.push("");
+    for (const issue of review.issues) {
+      const icon = severityIcon[issue.severity] || "";
+      const label = severityLabel[issue.severity] || issue.severity;
+      lines.push(`- ${icon} **[${label}]** ${issue.description}`);
+    }
+  } else if (review.verdict === "pass") {
+    lines.push("");
+    lines.push(`_${t("workflow.generation.reviewNoIssues")}_`);
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Parse the review phase response into a structured ReviewResult.
+ */
+function parseReviewResponse(response: string): ReviewResult {
+  try {
+    // Strip markdown code fences if present
+    let jsonStr = response.trim();
+    const fenceMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (fenceMatch) {
+      jsonStr = fenceMatch[1].trim();
+    }
+
+    const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
+    const verdict = parsed.verdict === "fail" ? "fail" : "pass";
+    const summary = typeof parsed.summary === "string" ? parsed.summary : "";
+    const issues: ReviewResult["issues"] = [];
+
+    if (Array.isArray(parsed.issues)) {
+      for (const item of parsed.issues) {
+        if (item && typeof item === "object" && "description" in item) {
+          const severity = (item as { severity?: string }).severity;
+          issues.push({
+            severity: severity === "high" || severity === "medium" || severity === "low" ? severity : "medium",
+            description: String((item as { description: unknown }).description),
+          });
+        }
+      }
+    }
+
+    return { verdict, summary, issues };
+  } catch {
+    // JSON parse failed — the reviewer likely flagged real issues but
+    // produced malformed output. Treat as "fail" so refinement runs
+    // with the raw text, rather than silently accepting.
+    console.warn("Failed to parse review response as JSON, treating as fail");
+    return {
+      verdict: "fail",
+      summary: response.trim().substring(0, 500),
+      issues: [{ severity: "high", description: "Review output could not be parsed; refinement triggered with raw reviewer feedback" }],
+      rawText: response.trim(),
+    };
   }
 }

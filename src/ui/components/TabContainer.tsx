@@ -38,7 +38,7 @@ const TabContainer = forwardRef<TabContainerRef, TabContainerProps>(
             className={`llm-hub-tab ${activeTab === "chat" ? "active" : ""}`}
             onClick={() => setActiveTab("chat")}
           >
-            Chat
+            {t("tab.chat")}
           </button>
           <button
             className={`llm-hub-tab ${activeTab === "search" ? "active" : ""}`}
@@ -50,7 +50,7 @@ const TabContainer = forwardRef<TabContainerRef, TabContainerProps>(
             className={`llm-hub-tab ${activeTab === "workflow" ? "active" : ""}`}
             onClick={() => setActiveTab("workflow")}
           >
-            Workflow
+            {t("tab.workflowSkill")}
           </button>
         </div>
         <div className="llm-hub-tab-content">

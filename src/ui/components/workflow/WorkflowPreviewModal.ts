@@ -1,5 +1,6 @@
-import { App, Modal, Platform } from "obsidian";
+import { App, Modal, Platform, Component } from "obsidian";
 import type { SidebarNode, WorkflowNodeType } from "src/workflow/types";
+import { type GenerationContext, renderGenerationContext } from "./AIWorkflowModal";
 import { t } from "src/i18n";
 
 export type PreviewResult = "ok" | "no" | "cancel";
@@ -98,10 +99,12 @@ export class WorkflowPreviewModal extends Modal {
   private nodes: SidebarNode[];
   private workflowName: string;
   private previousRequest: string;
+  private generationContext: GenerationContext;
   private resolvePromise: (result: WorkflowPreviewResult) => void;
   private additionalRequestEl: HTMLTextAreaElement | null = null;
   private additionalRequestContainerEl: HTMLElement | null = null;
   private isShowingAdditionalRequest = false;
+  private markdownComponent: Component | null = null;
 
   constructor(
     app: App,
@@ -109,6 +112,7 @@ export class WorkflowPreviewModal extends Modal {
     nodes: SidebarNode[],
     workflowName: string,
     previousRequest: string,
+    generationContext: GenerationContext,
     resolvePromise: (result: WorkflowPreviewResult) => void
   ) {
     super(app);
@@ -116,6 +120,7 @@ export class WorkflowPreviewModal extends Modal {
     this.nodes = nodes;
     this.workflowName = workflowName;
     this.previousRequest = previousRequest;
+    this.generationContext = generationContext;
     this.resolvePromise = resolvePromise;
   }
 
@@ -152,6 +157,12 @@ export class WorkflowPreviewModal extends Modal {
     yamlDetails.createEl("summary", { text: t("workflow.preview.showYaml") });
     const yamlPre = yamlDetails.createEl("pre", { cls: "llm-hub-workflow-preview-yaml" });
     yamlPre.textContent = this.yaml;
+
+    // Generation context (plan/thinking/review) as collapsible sections.
+    // In the preview modal the plan/review are primary content, so open by default.
+    this.markdownComponent = new Component();
+    this.markdownComponent.load();
+    renderGenerationContext(contentEl, this.generationContext, this.app, this.markdownComponent, { defaultOpen: true });
 
     // Additional request container (hidden initially)
     this.additionalRequestContainerEl = contentEl.createDiv({
@@ -236,6 +247,13 @@ export class WorkflowPreviewModal extends Modal {
       const idLabel = header.createSpan({ cls: "llm-hub-workflow-preview-node-id" });
       idLabel.textContent = node.id;
 
+      // Node comment (human-readable description of purpose)
+      const commentText = node.properties.comment?.trim();
+      if (commentText) {
+        const commentEl = nodeCard.createDiv({ cls: "llm-hub-workflow-preview-node-comment" });
+        commentEl.textContent = commentText;
+      }
+
       // Node summary
       const summary = getNodeSummary(node);
       if (summary) {
@@ -307,6 +325,10 @@ export class WorkflowPreviewModal extends Modal {
   }
 
   onClose(): void {
+    if (this.markdownComponent) {
+      this.markdownComponent.unload();
+      this.markdownComponent = null;
+    }
     const { contentEl } = this;
     contentEl.empty();
   }
@@ -320,10 +342,11 @@ export function showWorkflowPreview(
   yaml: string,
   nodes: SidebarNode[],
   workflowName: string,
-  previousRequest: string
+  previousRequest: string,
+  generationContext: GenerationContext = {}
 ): Promise<WorkflowPreviewResult> {
   return new Promise((resolve) => {
-    const modal = new WorkflowPreviewModal(app, yaml, nodes, workflowName, previousRequest, resolve);
+    const modal = new WorkflowPreviewModal(app, yaml, nodes, workflowName, previousRequest, generationContext, resolve);
     modal.open();
   });
 }

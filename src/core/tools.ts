@@ -156,13 +156,14 @@ const proposeEdit: ToolDefinition = {
   },
 };
 
-// Skill workflow tool (dynamically added when skills with workflows are active)
+export const SKILL_WORKFLOW_TOOL_NAME = "run_skill_workflow";
+
 export const skillWorkflowTool: ToolDefinition = {
   type: "function",
   function: {
-    name: "run_skill_workflow",
+    name: SKILL_WORKFLOW_TOOL_NAME,
     description:
-      "Run a workflow provided by an active agent skill. Workflows can execute commands, HTTP requests, file operations, and more. Specify the workflow ID from the active skills and optional input variables.",
+      "Run a workflow provided by an active agent skill. Workflows can execute commands, HTTP requests, file operations, and more. Specify the workflow ID from the active skills and optional input variables. If the workflow fails, do NOT retry automatically — report the error to the user instead.",
     parameters: {
       type: "object",
       properties: {

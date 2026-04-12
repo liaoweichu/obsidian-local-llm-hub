@@ -281,7 +281,7 @@ export function extractInputVariables(workflowContent: string, workflowName?: st
 /**
  * Parse YAML frontmatter from markdown content.
  */
-function parseFrontmatter(content: string): { frontmatter: Record<string, unknown>; body: string } {
+export function parseFrontmatter(content: string): { frontmatter: Record<string, unknown>; body: string } {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
   if (!match) {
     return { frontmatter: {}, body: content };

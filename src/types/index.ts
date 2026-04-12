@@ -99,6 +99,13 @@ export interface ToolCall {
   arguments: Record<string, unknown>;
 }
 
+// Tool execution result associated with a tool call.
+// `result` may be a parsed object (e.g. JSON response) or raw string.
+export interface ToolResult {
+  toolCallId: string;
+  result: unknown;
+}
+
 // Chat message types
 export interface Attachment {
   name: string;
@@ -121,6 +128,7 @@ export interface Message {
   ragSources?: string[];        // source files from RAG
   skillsUsed?: string[];        // names of skills used
   toolCalls?: ToolCall[];       // tool calls made by assistant
+  toolResults?: ToolResult[];   // results of tool calls (keyed by toolCallId)
   toolCallId?: string;          // tool call ID (for tool role messages, LM Studio)
   toolName?: string;            // tool name (for tool role messages, Ollama)
   usage?: StreamChunkUsage;
@@ -234,6 +242,8 @@ export interface LocalLlmHubSettings {
 export const SKILLS_FOLDER = "skills";
 /** Fixed workflows folder name. */
 export const WORKFLOWS_FOLDER = "workflows";
+/** Basename (no extension) of a skill definition file: skills/<dir>/SKILL.md. */
+export const SKILL_FILE_BASENAME = "SKILL";
 /** Fixed workspace folder name. */
 export const WORKSPACE_FOLDER = "LocalLlmHub";
 

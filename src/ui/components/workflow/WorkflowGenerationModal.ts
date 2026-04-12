@@ -1,4 +1,4 @@
-import { App, Modal } from "obsidian";
+import { App, Modal, MarkdownRenderer, Component } from "obsidian";
 import type { StreamChunkUsage } from "src/types";
 import { t } from "src/i18n";
 
@@ -7,19 +7,38 @@ export interface WorkflowGenerationResult {
   cancelled: boolean;
 }
 
-/**
- * Modal that displays workflow generation progress with thinking streaming
- */
+export type GenerationPhase = "planning" | "generating" | "reviewing";
+
+export interface PlanConfirmResult {
+  action: "ok" | "replan" | "cancel";
+  feedback?: string;
+}
+
+export interface ReviewConfirmResult {
+  action: "ok" | "refine" | "cancel";
+}
+
 export class WorkflowGenerationModal extends Modal {
   private request: string;
   private modelDisplayName: string;
+  private currentPhase: GenerationPhase = "generating";
+  private planningEnabled: boolean;
+  private phaseIndicatorEl: HTMLElement | null = null;
+  private planSectionEl: HTMLElement | null = null;
+  private planContainerEl: HTMLElement | null = null;
   private thinkingContainerEl: HTMLElement | null = null;
+  private reviewSectionEl: HTMLElement | null = null;
+  private reviewContainerEl: HTMLElement | null = null;
   private statusEl: HTMLElement | null = null;
   private cancelBtn: HTMLButtonElement | null = null;
   private abortController: AbortController;
   private onCancel: () => void;
   private isCancelled = false;
   private executionStepsCount: number;
+  private thinkingText = "";
+  private reviewText = "";
+  private planText = "";
+  private markdownComponent: Component | null = null;
 
   constructor(
     app: App,
@@ -27,7 +46,8 @@ export class WorkflowGenerationModal extends Modal {
     abortController: AbortController,
     onCancel: () => void,
     executionStepsCount = 0,
-    modelDisplayName = ""
+    modelDisplayName = "",
+    planningEnabled = false
   ) {
     super(app);
     this.request = request;
@@ -35,6 +55,7 @@ export class WorkflowGenerationModal extends Modal {
     this.onCancel = onCancel;
     this.executionStepsCount = executionStepsCount;
     this.modelDisplayName = modelDisplayName;
+    this.planningEnabled = planningEnabled;
   }
 
   onOpen(): void {
@@ -79,14 +100,28 @@ export class WorkflowGenerationModal extends Modal {
       });
     }
 
-    // Thinking section
+    this.phaseIndicatorEl = contentEl.createDiv({ cls: "llm-hub-workflow-generation-phase-indicator" });
+    this.renderPhaseIndicator();
+
+    this.planSectionEl = contentEl.createDiv({
+      cls: `llm-hub-workflow-generation-plan-section${this.planningEnabled ? "" : " is-hidden"}`,
+    });
+    const planHeader = this.planSectionEl.createDiv({ cls: "llm-hub-workflow-generation-section-header" });
+    planHeader.createEl("h3", { text: t("workflow.generation.planning") });
+    this.planContainerEl = this.planSectionEl.createDiv({ cls: "llm-hub-workflow-generation-plan" });
+
     const thinkingSection = contentEl.createDiv({ cls: "llm-hub-workflow-generation-thinking-section" });
     thinkingSection.createEl("h3", { text: t("workflow.generation.thinking") });
     this.thinkingContainerEl = thinkingSection.createDiv({ cls: "llm-hub-workflow-generation-thinking" });
 
+    this.reviewSectionEl = contentEl.createDiv({ cls: "llm-hub-workflow-generation-review-section is-hidden" });
+    const reviewHeader = this.reviewSectionEl.createDiv({ cls: "llm-hub-workflow-generation-section-header" });
+    reviewHeader.createEl("h3", { text: t("workflow.generation.reviewing") });
+    this.reviewContainerEl = this.reviewSectionEl.createDiv({ cls: "llm-hub-workflow-generation-review" });
+
     // Status indicator
     this.statusEl = contentEl.createDiv({ cls: "llm-hub-workflow-generation-status" });
-    this.statusEl.textContent = t("workflow.generation.generating");
+    this.updateStatusText();
 
     // Add loading animation
     const loadingDotsEl = this.statusEl.createSpan({ cls: "llm-hub-workflow-generation-loading-dots" });
@@ -103,6 +138,55 @@ export class WorkflowGenerationModal extends Modal {
     this.cancelBtn.addEventListener("click", () => {
       this.cancel();
     });
+  }
+
+  private renderPhaseIndicator(): void {
+    if (!this.phaseIndicatorEl) return;
+    this.phaseIndicatorEl.empty();
+
+    const phases: { key: GenerationPhase; label: string }[] = [
+      ...(this.planningEnabled ? [{ key: "planning" as GenerationPhase, label: t("workflow.generation.phasePlan") }] : []),
+      { key: "generating", label: t("workflow.generation.phaseGenerate") },
+      { key: "reviewing", label: t("workflow.generation.phaseReview") },
+    ];
+
+    for (const phase of phases) {
+      const stepEl = this.phaseIndicatorEl.createSpan({ cls: "llm-hub-workflow-generation-phase-step" });
+      if (phase.key === this.currentPhase) {
+        stepEl.addClass("is-active");
+      } else if (this.getPhaseOrder(phase.key) < this.getPhaseOrder(this.currentPhase)) {
+        stepEl.addClass("is-completed");
+      }
+      stepEl.textContent = phase.label;
+    }
+  }
+
+  private getPhaseOrder(phase: GenerationPhase): number {
+    const order: Record<GenerationPhase, number> = { planning: 0, generating: 1, reviewing: 2 };
+    return order[phase];
+  }
+
+  setPhase(phase: GenerationPhase): void {
+    this.currentPhase = phase;
+    this.renderPhaseIndicator();
+    this.updateStatusText();
+    this.contentEl.dataset.phase = phase;
+
+    if (phase === "reviewing") {
+      if (this.reviewSectionEl) {
+        this.reviewSectionEl.removeClass("is-hidden");
+      }
+    }
+  }
+
+  private updateStatusText(): void {
+    if (!this.statusEl) return;
+    const loadingDots = this.statusEl.querySelector(".llm-hub-workflow-generation-loading-dots");
+    const statusKey = `workflow.generation.${this.currentPhase}` as const;
+    this.statusEl.textContent = t(statusKey);
+    if (loadingDots) {
+      this.statusEl.appendChild(loadingDots);
+    }
   }
 
   private setupDragHandle(dragHandle: HTMLElement, modalEl: HTMLElement): void {
@@ -152,25 +236,261 @@ export class WorkflowGenerationModal extends Modal {
     dragHandle.addEventListener("mousedown", onMouseDown);
   }
 
-  /**
-   * Append thinking content to the thinking container
-   */
   appendThinking(content: string): void {
+    this.thinkingText += content;
     if (this.thinkingContainerEl) {
       const span = document.createElement("span");
       span.textContent = content;
       this.thinkingContainerEl.appendChild(span);
-      // Auto-scroll to bottom
       this.thinkingContainerEl.scrollTop = this.thinkingContainerEl.scrollHeight;
     }
   }
 
-  /**
-   * Update status text
-   */
+  appendThinkingSeparator(phaseLabel: string): void {
+    if (this.thinkingContainerEl) {
+      const sep = document.createElement("div");
+      sep.className = "llm-hub-workflow-generation-thinking-separator";
+      sep.textContent = `── ${phaseLabel} ──`;
+      this.thinkingContainerEl.appendChild(sep);
+      this.thinkingContainerEl.scrollTop = this.thinkingContainerEl.scrollHeight;
+    }
+  }
+
+  appendPlan(content: string): void {
+    this.planText += content;
+    if (this.planContainerEl) {
+      const span = document.createElement("span");
+      span.textContent = content;
+      this.planContainerEl.appendChild(span);
+      this.planContainerEl.scrollTop = this.planContainerEl.scrollHeight;
+    }
+  }
+
+  appendReview(content: string): void {
+    this.reviewText += content;
+    if (this.reviewContainerEl) {
+      const span = document.createElement("span");
+      span.textContent = content;
+      this.reviewContainerEl.appendChild(span);
+      this.reviewContainerEl.scrollTop = this.reviewContainerEl.scrollHeight;
+    }
+  }
+
+  getThinkingText(): string {
+    return this.thinkingText;
+  }
+
+  getReviewText(): string {
+    return this.reviewText;
+  }
+
+  beginRefining(label: string): void {
+    if (this.statusEl) {
+      this.statusEl.empty();
+      this.statusEl.appendText(label);
+      const loadingDotsEl = this.statusEl.createSpan({ cls: "llm-hub-workflow-generation-loading-dots" });
+      loadingDotsEl.createSpan({ cls: "dot" });
+      loadingDotsEl.createSpan({ cls: "dot" });
+      loadingDotsEl.createSpan({ cls: "dot" });
+      this.statusEl.addClass("llm-hub-workflow-generation-status-active");
+    }
+  }
+
+  renderReviewAsMarkdown(markdown: string): void {
+    if (!this.reviewContainerEl) return;
+
+    if (!this.markdownComponent) {
+      this.markdownComponent = new Component();
+      this.markdownComponent.load();
+    }
+
+    this.reviewContainerEl.empty();
+    this.reviewContainerEl.addClass("llm-hub-workflow-generation-plan-rendered");
+    void MarkdownRenderer.render(
+      this.app,
+      markdown,
+      this.reviewContainerEl,
+      "/",
+      this.markdownComponent
+    );
+  }
+
+  private renderPlanAsMarkdown(): void {
+    if (!this.planContainerEl || !this.planText) return;
+
+    if (this.markdownComponent) {
+      this.markdownComponent.unload();
+    }
+    this.markdownComponent = new Component();
+    this.markdownComponent.load();
+
+    this.planContainerEl.empty();
+    this.planContainerEl.addClass("llm-hub-workflow-generation-plan-rendered");
+    void MarkdownRenderer.render(
+      this.app,
+      this.planText,
+      this.planContainerEl,
+      "/",
+      this.markdownComponent
+    );
+  }
+
+  showPlanConfirmation(): Promise<PlanConfirmResult> {
+    return new Promise((resolve) => {
+      this.renderPlanAsMarkdown();
+
+      const loadingDots = this.statusEl?.querySelector(".llm-hub-workflow-generation-loading-dots");
+      if (loadingDots) loadingDots.remove();
+      if (this.statusEl) {
+        this.statusEl.textContent = t("workflow.generation.planComplete");
+      }
+      if (this.cancelBtn) {
+        this.cancelBtn.addClass("is-hidden");
+      }
+
+      const { contentEl } = this;
+      const confirmContainer = contentEl.createDiv({ cls: "llm-hub-workflow-generation-plan-confirm" });
+
+      const feedbackContainer = confirmContainer.createDiv({ cls: "llm-hub-workflow-generation-plan-feedback is-hidden" });
+      const feedbackEl = feedbackContainer.createEl("textarea", {
+        cls: "llm-hub-workflow-generation-plan-feedback-input",
+        attr: {
+          placeholder: t("workflow.generation.replanPlaceholder"),
+          rows: "3",
+        },
+      });
+
+      const btnContainer = confirmContainer.createDiv({ cls: "llm-hub-workflow-generation-plan-confirm-buttons" });
+
+      const cancelBtn = btnContainer.createEl("button", {
+        text: t("common.cancel"),
+      });
+
+      const replanBtn = btnContainer.createEl("button", {
+        text: t("workflow.generation.replan"),
+        cls: "mod-warning",
+      });
+
+      const okBtn = btnContainer.createEl("button", {
+        text: "OK",
+        cls: "mod-cta",
+      });
+
+      const cleanup = () => {
+        confirmContainer.remove();
+      };
+
+      cancelBtn.addEventListener("click", () => {
+        cleanup();
+        resolve({ action: "cancel" });
+      });
+
+      replanBtn.addEventListener("click", () => {
+        if (feedbackContainer.hasClass("is-hidden")) {
+          feedbackContainer.removeClass("is-hidden");
+          replanBtn.textContent = t("workflow.preview.regenerate");
+          feedbackEl.focus();
+        } else {
+          const feedback = feedbackEl.value.trim();
+          if (!feedback) {
+            feedbackEl.focus();
+            return;
+          }
+          cleanup();
+          resolve({ action: "replan", feedback });
+        }
+      });
+
+      okBtn.addEventListener("click", () => {
+        cleanup();
+        resolve({ action: "ok" });
+      });
+    });
+  }
+
+  resetForReplan(): void {
+    if (this.markdownComponent) {
+      this.markdownComponent.unload();
+      this.markdownComponent = null;
+    }
+    this.planText = "";
+    if (this.planContainerEl) {
+      this.planContainerEl.empty();
+      this.planContainerEl.removeClass("llm-hub-workflow-generation-plan-rendered");
+    }
+    if (this.statusEl) {
+      this.updateStatusText();
+      const loadingDotsEl = this.statusEl.createSpan({ cls: "llm-hub-workflow-generation-loading-dots" });
+      loadingDotsEl.createSpan({ cls: "dot" });
+      loadingDotsEl.createSpan({ cls: "dot" });
+      loadingDotsEl.createSpan({ cls: "dot" });
+    }
+    if (this.cancelBtn) {
+      this.cancelBtn.removeClass("is-hidden");
+    }
+  }
+
+  showReviewConfirmation(): Promise<ReviewConfirmResult> {
+    return new Promise((resolve) => {
+      const loadingDots = this.statusEl?.querySelector(".llm-hub-workflow-generation-loading-dots");
+      if (loadingDots) loadingDots.remove();
+      if (this.statusEl) {
+        this.statusEl.textContent = t("workflow.generation.reviewComplete");
+        this.statusEl.removeClass("llm-hub-workflow-generation-status-active");
+      }
+      if (this.cancelBtn) {
+        this.cancelBtn.addClass("is-hidden");
+      }
+
+      const { contentEl } = this;
+      const confirmContainer = contentEl.createDiv({
+        cls: "llm-hub-workflow-generation-plan-confirm llm-hub-workflow-generation-review-confirm",
+      });
+      const btnContainer = confirmContainer.createDiv({ cls: "llm-hub-workflow-generation-plan-confirm-buttons" });
+
+      const cancelBtn = btnContainer.createEl("button", { text: t("common.cancel") });
+      const refineBtn = btnContainer.createEl("button", {
+        text: t("workflow.generation.refineBtn"),
+        cls: "mod-warning",
+      });
+      const okBtn = btnContainer.createEl("button", {
+        text: "OK",
+        cls: "mod-cta",
+      });
+
+      const cleanup = () => {
+        confirmContainer.remove();
+      };
+
+      cancelBtn.addEventListener("click", () => { cleanup(); resolve({ action: "cancel" }); });
+      refineBtn.addEventListener("click", () => { cleanup(); resolve({ action: "refine" }); });
+      okBtn.addEventListener("click", () => { cleanup(); resolve({ action: "ok" }); });
+    });
+  }
+
+  resetReviewForIteration(): void {
+    this.reviewText = "";
+    if (this.reviewContainerEl) {
+      this.reviewContainerEl.empty();
+      this.reviewContainerEl.removeClass("llm-hub-workflow-generation-plan-rendered");
+    }
+    this.contentEl.querySelectorAll(".llm-hub-workflow-generation-review-confirm").forEach(el => el.remove());
+    if (this.statusEl) {
+      this.statusEl.empty();
+      this.statusEl.appendText(t("workflow.generation.reviewing"));
+      const loadingDotsEl = this.statusEl.createSpan({ cls: "llm-hub-workflow-generation-loading-dots" });
+      loadingDotsEl.createSpan({ cls: "dot" });
+      loadingDotsEl.createSpan({ cls: "dot" });
+      loadingDotsEl.createSpan({ cls: "dot" });
+      this.statusEl.removeClass("llm-hub-workflow-generation-status-active");
+    }
+    if (this.cancelBtn) {
+      this.cancelBtn.removeClass("is-hidden");
+    }
+  }
+
   setStatus(status: string): void {
     if (this.statusEl) {
-      // Clear existing content but keep the first text node
       const loadingDots = this.statusEl.querySelector(".llm-hub-workflow-generation-loading-dots");
       this.statusEl.textContent = status;
       if (loadingDots) {
@@ -179,9 +499,6 @@ export class WorkflowGenerationModal extends Modal {
     }
   }
 
-  /**
-   * Mark generation as complete (hides loading dots)
-   */
   setComplete(): void {
     if (this.statusEl) {
       const loadingDots = this.statusEl.querySelector(".llm-hub-workflow-generation-loading-dots");
@@ -191,10 +508,6 @@ export class WorkflowGenerationModal extends Modal {
     }
   }
 
-  /**
-   * Get usage info formatted as a string for Notice display.
-   * Returns null if no usage data is available.
-   */
   static formatUsageNotice(usage?: StreamChunkUsage, elapsedMs?: number): string | null {
     if (!usage && elapsedMs === undefined) return null;
     const parts: string[] = [];
@@ -211,9 +524,6 @@ export class WorkflowGenerationModal extends Modal {
     return parts.length > 0 ? parts.join(" | ") : null;
   }
 
-  /**
-   * Check if generation was cancelled
-   */
   wasCancelled(): boolean {
     return this.isCancelled;
   }
@@ -226,6 +536,10 @@ export class WorkflowGenerationModal extends Modal {
   }
 
   onClose(): void {
+    if (this.markdownComponent) {
+      this.markdownComponent.unload();
+      this.markdownComponent = null;
+    }
     const { contentEl } = this;
     contentEl.empty();
   }

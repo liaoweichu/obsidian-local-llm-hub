@@ -33,18 +33,27 @@ Describe what you want in plain language. The AI builds the workflow. No YAML kn
 
 ![Create Workflow with AI](docs/images/create_workflow.png)
 
-1. Open the **Workflow** tab → select **+ New (AI)**
+1. Open the **Workflow / skill** tab → select **+ New (AI)**
 2. Describe: *"Convert the current page into an infographic and save it"*
 3. Check **"Create as agent skill"** if you want to create an agent skill instead of a standalone workflow
-4. Click **Generate** — done
+4. Click **Generate**
+5. The AI produces a plain-language **plan** first — review it and click **OK** to proceed, **Re-plan** to give feedback and regenerate the plan, or **Cancel** to abort
+6. After generation, the AI runs a **review** over the result. If issues are found you can **OK** (with a confirmation prompt), **Refine** (regenerate using the review feedback), or **Cancel**. Clean reviews proceed automatically
+7. The workflow is saved once you accept the final preview
 
 Don't have a powerful local model? Click **Copy Prompt**, paste into Claude/GPT/Gemini, paste the response back, and click **Apply**.
 
 ![Create Skill with External LLM](docs/images/create_skill_with_external_llm.png)
 
+**Create workflow / skill from any file:**
+
+When opening the Workflow / skill tab with a file that has no workflow code block, separate **Create workflow with AI** and **Create skill with AI** buttons are displayed. Click either one to generate directly into the right shape without toggling a checkbox.
+
 ### Modify with AI
 
-Load any workflow, click **AI Modify**, describe the change. Reference execution history to debug failures.
+Load any workflow, click **AI Modify**, describe the change. The same plan → generate → review flow runs. You can **Refine** the review result as many times as you want; each Refine triggers a new generation pass and a fresh review so the review always matches the final YAML. Reference execution history to debug failures.
+
+**Modify Skill with AI:** When the active file is a `SKILL.md`, the Workflow / skill tab shows a **Modify skill with AI** button. It updates the SKILL.md instructions body *and* the referenced workflow file in a single pass, preserving the skill's frontmatter (name, description, workflow entries).
 
 ![Modify Workflow with AI](docs/images/modify_workflow.png)
 
@@ -121,7 +130,11 @@ See [RAG_SEARCH.md](docs/RAG_SEARCH.md) for details.
 
 Inject reusable instructions into the system prompt via `SKILL.md` files. Activate per conversation. Skills can also expose workflows that the AI can invoke as tools during chat.
 
-Create skills the same way as workflows — select **+ New (AI)**, check **"Create as agent skill"**, and describe what you want. The AI generates both the `SKILL.md` instructions and the workflow.
+Create skills the same way as workflows — select **+ New (AI)**, check **"Create as agent skill"** (or click **Create skill with AI** directly from a fresh file), and describe what you want. The AI generates both the `SKILL.md` instructions and the workflow. To edit an existing skill, open its `SKILL.md` and click **Modify skill with AI** in the Workflow / skill tab — the AI updates both the instructions body and the referenced workflow together.
+
+**Clickable skill chips:** Active skill chips in the chat input area and on assistant messages are clickable and jump to the matching `SKILL.md` (built-in skills are shown as static labels).
+
+**Workflow error recovery:** If a skill workflow fails during a chat, the failing tool call shows an **Open workflow** button. Clicking it opens the workflow file *and* switches to the Workflow / skill tab so you can immediately edit and re-run. Use **Modify workflow with AI** together with **Reference execution history** to let the AI fix the failing step.
 
 ![Agent Skills](docs/images/skill.png)
 

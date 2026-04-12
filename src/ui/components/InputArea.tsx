@@ -630,6 +630,7 @@ const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(function InputArea
           activeSkillPaths={activeSkillPaths || []}
           onToggleSkill={onToggleSkill}
           disabled={isLoading}
+          app={app}
         />
       )}
     </div>

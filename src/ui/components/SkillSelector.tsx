@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { Sparkles, X, Plus } from "lucide-react";
+import { type App } from "obsidian";
 import type { SkillMetadata } from "src/core/skillsLoader";
 import { isBuiltinSkillPath } from "src/core/builtinSkills";
 import { t } from "src/i18n";
@@ -10,6 +11,7 @@ interface SkillSelectorProps {
   activeSkillPaths: string[];
   onToggleSkill: (folderPath: string) => void;
   disabled?: boolean;
+  app: App;
 }
 
 export default function SkillSelector({
@@ -17,6 +19,7 @@ export default function SkillSelector({
   activeSkillPaths,
   onToggleSkill,
   disabled,
+  app,
 }: SkillSelectorProps) {
   const [showDropdown, setShowDropdown] = useState(false);
   const selectorRef = useRef<HTMLDivElement>(null);
@@ -60,18 +63,33 @@ export default function SkillSelector({
   return (
     <div className="llm-hub-skill-selector" ref={selectorRef}>
       <Sparkles size={14} className="llm-hub-skill-icon" />
-      {activeSkills.map(skill => (
-        <span key={skill.folderPath} className="llm-hub-skill-chip" title={skill.description}>
-          {skill.name}
-          <button
-            className="llm-hub-skill-chip-remove"
-            onClick={() => onToggleSkill(skill.folderPath)}
-            disabled={disabled}
-          >
-            <X size={10} />
-          </button>
-        </span>
-      ))}
+      {activeSkills.map(skill => {
+        const builtin = isBuiltinSkillPath(skill.folderPath);
+        return (
+          <span key={skill.folderPath} className="llm-hub-skill-chip" title={skill.description}>
+            {builtin ? (
+              <span className="llm-hub-skill-chip-name is-static">{skill.name}</span>
+            ) : (
+              <span
+                className="llm-hub-skill-chip-name llm-hub-tool-clickable"
+                onClick={() => {
+                  void app.workspace.openLinkText(skill.skillFilePath, "", false);
+                }}
+                title={t("message.clickToOpen", { source: skill.name })}
+              >
+                {skill.name}
+              </span>
+            )}
+            <button
+              className="llm-hub-skill-chip-remove"
+              onClick={() => onToggleSkill(skill.folderPath)}
+              disabled={disabled}
+            >
+              <X size={10} />
+            </button>
+          </span>
+        );
+      })}
       <button
         className="llm-hub-skill-add-btn"
         onClick={() => setShowDropdown(!showDropdown)}

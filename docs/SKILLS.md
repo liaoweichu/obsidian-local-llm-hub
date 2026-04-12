@@ -148,6 +148,20 @@ Workflows declared in frontmatter take precedence — if the same path appears i
 
 When a skill with workflows is active, the `run_skill_workflow` tool is automatically added to the available tools, allowing the AI to execute these workflows during chat.
 
+### Returning values to the chat
+
+When the AI invokes a skill workflow via `run_skill_workflow`, **every variable whose name does not start with `__` is automatically returned to the chat AI** as part of the tool result. You do not need to add a trailing `command` node just to "output" a result — simply `saveTo:` the value you want the chat AI to see. Use a `__`-prefixed name for any variable you want to keep internal to the workflow.
+
+A `command` node runs a separate LLM call *inside* the workflow and stores its output to a variable; it does not write directly to the chat. If you want a specific variable rendered verbatim in the chat reply, put that instruction in the SKILL.md instructions body, for example:
+
+> After the workflow completes, output the value of `ogpMarkdown` to the user verbatim, with no additional commentary.
+
+The chat-side AI, guided by those instructions, will include the variable in its response.
+
+### Error recovery
+
+If a skill workflow fails during a chat, the failing tool call shows an **Open workflow** button. Clicking it opens the workflow file *and* switches the sidebar to the Workflow / skill tab so you can edit the flow and re-run. From there, use **Modify workflow with AI** together with **Reference execution history** to let the AI see exactly which step failed and what input caused the failure — then describe the fix and re-run.
+
 ## Configuration
 
 In plugin settings under **Workspace**:

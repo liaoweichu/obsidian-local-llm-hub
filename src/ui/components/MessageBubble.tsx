@@ -1,7 +1,11 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { type App, MarkdownRenderer, Component } from "obsidian";
 import { Copy, Check } from "lucide-react";
-import type { Message } from "src/types";
+import type { Message, ToolCall, ToolResult } from "src/types";
+import { discoverSkills } from "src/core/skillsLoader";
+import { isBuiltinSkillPath } from "src/core/builtinSkills";
+import { SKILL_WORKFLOW_TOOL_NAME } from "src/core/tools";
+import { ChatView, VIEW_TYPE_LLM_CHAT } from "src/ui/ChatView";
 import { t } from "src/i18n";
 
 interface MessageBubbleProps {
@@ -20,7 +24,17 @@ export default function MessageBubble({
   const contentRef = useRef<HTMLDivElement>(null);
   const componentRef = useRef<Component | null>(null);
 
-  // Render markdown content using Obsidian's MarkdownRenderer
+  const failedWorkflowPaths = useMemo(() => {
+    if (!message.toolCalls) return new Map<string, string>();
+    const map = new Map<string, string>();
+    for (const tc of message.toolCalls) {
+      const path = getFailedWorkflowPath(tc, message.toolResults);
+      if (path) map.set(tc.id, path);
+    }
+    return map;
+  }, [message.toolCalls, message.toolResults]);
+
+
   useEffect(() => {
     if (!contentRef.current) return;
 
@@ -142,16 +156,8 @@ export default function MessageBubble({
         </div>
       )}
 
-      {/* Skills used indicator */}
       {message.skillsUsed && message.skillsUsed.length > 0 && (
-        <div className="llm-hub-skills-used">
-          <span className="llm-hub-skills-used-label">
-            {t("message.skillsUsed")}:
-          </span>
-          {message.skillsUsed.map((name, index) => (
-            <span key={index} className="llm-hub-skill-name">{name}</span>
-          ))}
-        </div>
+        <SkillsUsedIndicator skillNames={message.skillsUsed} app={app} />
       )}
 
       {/* Attachments display */}
@@ -170,14 +176,37 @@ export default function MessageBubble({
 
       {/* Tool calls indicator */}
       {message.toolCalls && message.toolCalls.length > 0 && (
-        <div className="llm-hub-tools-used">
-          <span className="llm-hub-tools-used-label">
-            {t("message.toolsUsed")}:
-          </span>
-          {[...new Set(message.toolCalls.map(tc => tc.name))].map((name, index) => (
-            <span key={index} className="llm-hub-tool-name">{name}</span>
-          ))}
-        </div>
+        <>
+          <div className="llm-hub-tools-used">
+            <span className="llm-hub-tools-used-label">
+              {t("message.toolsUsed")}:
+            </span>
+            {message.toolCalls.map((toolCall, index) => {
+              const failedWorkflowPath = failedWorkflowPaths.get(toolCall.id);
+              return (
+                <span key={index} className="llm-hub-tool-indicator-group">
+                  <span className="llm-hub-tool-name">{toolCall.name}</span>
+                  {failedWorkflowPath && (
+                    <button
+                      className="llm-hub-tool-open-workflow-btn"
+                      onClick={() => {
+                        void openWorkflowInPanel(app, failedWorkflowPath);
+                      }}
+                      title={t("message.clickToOpen", { source: failedWorkflowPath })}
+                    >
+                      📂 {t("message.openWorkflow")}
+                    </button>
+                  )}
+                </span>
+              );
+            })}
+          </div>
+          {failedWorkflowPaths.size > 0 && (
+            <div className="llm-hub-workflow-error-hint">
+              {t("message.workflowErrorHint")}
+            </div>
+          )}
+        </>
       )}
 
       {/* Thinking content (collapsible) */}
@@ -210,6 +239,71 @@ export default function MessageBubble({
       )}
     </div>
   );
+}
+
+function SkillsUsedIndicator({ skillNames, app }: { skillNames: string[]; app: App }) {
+  const [skillMap, setSkillMap] = useState<Map<string, { path: string; builtin: boolean }>>(new Map());
+
+  useEffect(() => {
+    let cancelled = false;
+    void discoverSkills(app).then((skills) => {
+      if (cancelled) return;
+      const map = new Map<string, { path: string; builtin: boolean }>();
+      for (const s of skills) {
+        map.set(s.name, { path: s.skillFilePath, builtin: isBuiltinSkillPath(s.folderPath) });
+      }
+      setSkillMap(map);
+    });
+    return () => { cancelled = true; };
+  }, [app, skillNames]);
+
+  return (
+    <div className="llm-hub-skills-used">
+      <span className="llm-hub-skills-used-label">
+        {t("message.skillsUsed")}:
+      </span>
+      {skillNames.map((skillName, index) => {
+        const info = skillMap.get(skillName);
+        const isBuiltin = info?.builtin ?? false;
+        const isClickable = !!info && !isBuiltin;
+        return (
+          <span
+            key={index}
+            className={`llm-hub-skill-name${isClickable ? " llm-hub-tool-clickable" : " is-static"}`}
+            onClick={isClickable ? () => {
+              void app.workspace.openLinkText(info.path, "", false);
+            } : undefined}
+            title={isClickable ? t("message.clickToOpen", { source: skillName }) : skillName}
+          >
+            {skillName}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+async function openWorkflowInPanel(app: App, workflowPath: string): Promise<void> {
+  await app.workspace.openLinkText(workflowPath, "", false);
+
+  const leaves = app.workspace.getLeavesOfType(VIEW_TYPE_LLM_CHAT);
+  for (const leaf of leaves) {
+    const view = leaf.view;
+    if (view instanceof ChatView) {
+      view.setActiveTab("workflow");
+      void app.workspace.revealLeaf(leaf);
+    }
+  }
+}
+
+function getFailedWorkflowPath(toolCall: ToolCall, toolResults?: ToolResult[]): string | null {
+  if (toolCall.name !== SKILL_WORKFLOW_TOOL_NAME) return null;
+  if (!toolResults) return null;
+  const result = toolResults.find((r) => r.toolCallId === toolCall.id)?.result;
+  if (!result || typeof result !== "object") return null;
+  const r = result as Record<string, unknown>;
+  if (typeof r.error !== "string") return null;
+  return typeof r.workflowPath === "string" ? r.workflowPath : null;
 }
 
 function formatTime(timestamp: number): string {
