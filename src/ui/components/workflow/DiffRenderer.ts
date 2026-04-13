@@ -4,17 +4,13 @@ import { t } from "src/i18n";
 
 export { type DiffLine, type DiffLineType };
 
-/**
- * Options for rendering a diff view
- */
+export type DiffViewMode = "unified" | "split";
+
 export interface DiffRenderOptions {
-  viewMode: "unified" | "split";
+  viewMode: DiffViewMode;
   enableComments: boolean;
 }
 
-/**
- * A comment attached to a specific diff line
- */
 export interface LineComment {
   lineIndex: number;
   lineType: DiffLineType;
@@ -23,21 +19,15 @@ export interface LineComment {
   comment: string;
 }
 
-/**
- * State object returned by renderDiffView for external interaction
- */
 export interface DiffRendererState {
   container: HTMLElement;
-  viewMode: "unified" | "split";
+  viewMode: DiffViewMode;
   lineComments: Map<number, LineComment>;
   onCommentsChange: (() => void) | null;
-  setViewMode: (mode: "unified" | "split") => void;
+  setViewMode: (mode: DiffViewMode) => void;
   destroy: () => void;
 }
 
-/**
- * Paired row for split view: left (old) and right (new) sides
- */
 interface SplitRow {
   left: DiffLine | null;
   right: DiffLine | null;
@@ -45,19 +35,14 @@ interface SplitRow {
   rightIndex: number;
 }
 
-/**
- * Pair info for word-level diff: maps a line index to its paired counterpart
- */
 interface LinePair {
   removedIndex: number;
   addedIndex: number;
   removedContent: string;
   addedContent: string;
+  wordChanges: Diff.Change[];
 }
 
-/**
- * Build pairs of removed/added lines for word-level diff
- */
 function buildLinePairs(diffLines: DiffLine[]): Map<number, LinePair> {
   const pairs = new Map<number, LinePair>();
   let i = 0;
@@ -75,11 +60,17 @@ function buildLinePairs(diffLines: DiffLine[]): Map<number, LinePair> {
       }
       const pairCount = Math.min(removed.length, added.length);
       for (let j = 0; j < pairCount; j++) {
+        const removedContent = removed[j].line.content;
+        const addedContent = added[j].line.content;
+        // Compute word-level diff once per pair; renderWordDiff reuses the
+        // result for both sides of unified/split view.
+        const wordChanges = Diff.diffWords(removedContent, addedContent);
         const pair: LinePair = {
           removedIndex: removed[j].index,
           addedIndex: added[j].index,
-          removedContent: removed[j].line.content,
-          addedContent: added[j].line.content,
+          removedContent,
+          addedContent,
+          wordChanges,
         };
         pairs.set(removed[j].index, pair);
         pairs.set(added[j].index, pair);
@@ -91,29 +82,22 @@ function buildLinePairs(diffLines: DiffLine[]): Map<number, LinePair> {
   return pairs;
 }
 
-/**
- * Render word-level diff highlights into a content element
- */
 function renderWordDiff(
   contentEl: HTMLElement,
-  oldContent: string,
-  newContent: string,
+  changes: Diff.Change[],
   side: "old" | "new"
 ): void {
-  const changes = Diff.diffWords(oldContent, newContent);
   for (const change of changes) {
     if (change.added) {
       if (side === "new") {
         const span = contentEl.createSpan({ cls: "llm-hub-diff-word-added" });
         span.textContent = change.value;
       }
-      // Skip added parts on old side
     } else if (change.removed) {
       if (side === "old") {
         const span = contentEl.createSpan({ cls: "llm-hub-diff-word-removed" });
         span.textContent = change.value;
       }
-      // Skip removed parts on new side
     } else {
       const span = contentEl.createSpan();
       span.textContent = change.value;
@@ -121,9 +105,6 @@ function renderWordDiff(
   }
 }
 
-/**
- * Pair diff lines for split view
- */
 function pairLinesForSplitView(diffLines: DiffLine[]): SplitRow[] {
   const rows: SplitRow[] = [];
   let i = 0;
@@ -156,9 +137,12 @@ function pairLinesForSplitView(diffLines: DiffLine[]): SplitRow[] {
   return rows;
 }
 
-/**
- * Render a unified diff view into the container
- */
+function appendCommentPreview(parent: HTMLElement, comment: string): void {
+  const commentPreview = parent.createDiv({ cls: "llm-hub-diff-comment-preview" });
+  const commentText = commentPreview.createSpan();
+  commentText.textContent = comment;
+}
+
 function renderUnifiedView(
   container: HTMLElement,
   diffLines: DiffLine[],
@@ -180,15 +164,12 @@ function renderUnifiedView(
       lineEl.addClass("llm-hub-diff-has-comment");
     }
 
-    // Old line number
     const oldNumEl = lineEl.createSpan({ cls: "llm-hub-diff-linenum llm-hub-diff-linenum-old" });
     oldNumEl.textContent = line.oldLineNum != null ? String(line.oldLineNum) : "";
 
-    // New line number
     const newNumEl = lineEl.createSpan({ cls: "llm-hub-diff-linenum llm-hub-diff-linenum-new" });
     newNumEl.textContent = line.newLineNum != null ? String(line.newLineNum) : "";
 
-    // Gutter (+/-/space)
     const gutterEl = lineEl.createSpan({ cls: "llm-hub-diff-gutter" });
     if (line.type === "removed") {
       gutterEl.textContent = "-";
@@ -198,39 +179,31 @@ function renderUnifiedView(
       gutterEl.textContent = " ";
     }
 
-    // Content with optional word-level diff
     const contentEl = lineEl.createSpan({ cls: "llm-hub-diff-content" });
     const pair = linePairs.get(idx);
     if (pair && line.type === "removed") {
-      renderWordDiff(contentEl, pair.removedContent, pair.addedContent, "old");
+      renderWordDiff(contentEl, pair.wordChanges, "old");
     } else if (pair && line.type === "added") {
-      renderWordDiff(contentEl, pair.removedContent, pair.addedContent, "new");
+      renderWordDiff(contentEl, pair.wordChanges, "new");
     } else {
       contentEl.textContent = line.content || " ";
     }
 
-    // Click-to-comment on added/removed lines
     if (enableComments && line.type !== "unchanged" && openCommentEditor) {
       lineEl.addClass("llm-hub-diff-commentable");
       lineEl.addEventListener("click", (e) => {
-        // Don't trigger if clicking inside a comment editor
+        // Ignore clicks inside an open editor so its own buttons work.
         if ((e.target as HTMLElement).closest(".llm-hub-diff-comment-editor")) return;
         openCommentEditor(idx, lineEl);
       });
     }
 
-    // Show existing comment indicator inline
     if (lineComments.has(idx)) {
-      const commentPreview = container.createDiv({ cls: "llm-hub-diff-comment-preview" });
-      const commentText = commentPreview.createSpan();
-      commentText.textContent = lineComments.get(idx)!.comment;
+      appendCommentPreview(container, lineComments.get(idx)!.comment);
     }
   }
 }
 
-/**
- * Render a split (side-by-side) diff view into the container
- */
 function renderSplitView(
   container: HTMLElement,
   diffLines: DiffLine[],
@@ -247,7 +220,6 @@ function renderSplitView(
   for (const row of rows) {
     const rowEl = container.createDiv({ cls: "llm-hub-diff-split-row" });
 
-    // Left side (old)
     const leftEl = rowEl.createDiv({
       cls: `llm-hub-diff-split-cell llm-hub-diff-split-left ${row.left ? `llm-hub-diff-${row.left.type}` : "llm-hub-diff-split-filler"}`,
     });
@@ -264,7 +236,7 @@ function renderSplitView(
       const contentEl = leftEl.createSpan({ cls: "llm-hub-diff-content" });
       const pair = linePairs.get(row.leftIndex);
       if (pair && row.left.type === "removed") {
-        renderWordDiff(contentEl, pair.removedContent, pair.addedContent, "old");
+        renderWordDiff(contentEl, pair.wordChanges, "old");
       } else {
         contentEl.textContent = row.left.content || " ";
       }
@@ -279,7 +251,6 @@ function renderSplitView(
       }
     }
 
-    // Right side (new)
     const rightEl = rowEl.createDiv({
       cls: `llm-hub-diff-split-cell llm-hub-diff-split-right ${row.right ? `llm-hub-diff-${row.right.type}` : "llm-hub-diff-split-filler"}`,
     });
@@ -296,7 +267,7 @@ function renderSplitView(
       const contentEl = rightEl.createSpan({ cls: "llm-hub-diff-content" });
       const pair = linePairs.get(row.rightIndex);
       if (pair && row.right.type === "added") {
-        renderWordDiff(contentEl, pair.removedContent, pair.addedContent, "new");
+        renderWordDiff(contentEl, pair.wordChanges, "new");
       } else {
         contentEl.textContent = row.right.content || " ";
       }
@@ -311,21 +282,17 @@ function renderSplitView(
       }
     }
 
-    // Show comment previews for this row
+    // Append comment previews directly under the row so they track their line
+    // instead of stacking at the bottom of the container.
     const commentIndices = [row.leftIndex, row.rightIndex].filter(
       (idx) => idx >= 0 && lineComments.has(idx)
     );
     for (const idx of commentIndices) {
-      const commentPreview = container.createDiv({ cls: "llm-hub-diff-comment-preview" });
-      const commentText = commentPreview.createSpan();
-      commentText.textContent = lineComments.get(idx)!.comment;
+      appendCommentPreview(container, lineComments.get(idx)!.comment);
     }
   }
 }
 
-/**
- * Create a comment editor inline after a diff line
- */
 function createCommentEditor(
   diffLines: DiffLine[],
   lineIndex: number,
@@ -333,7 +300,6 @@ function createCommentEditor(
   lineComments: Map<number, LineComment>,
   onSave: () => void
 ): void {
-  // Remove any existing open editor
   const existing = afterEl.parentElement?.querySelector(".llm-hub-diff-comment-editor");
   if (existing) {
     existing.remove();
@@ -353,7 +319,7 @@ function createCommentEditor(
   if (existingComment) {
     textarea.value = existingComment.comment;
   }
-  // Prevent clicks inside the editor from triggering diff line click handlers
+  // Prevent clicks inside the editor from reopening the diff-line click handler.
   editor.addEventListener("click", (e) => e.stopPropagation());
   editor.appendChild(textarea);
 
@@ -376,7 +342,7 @@ function createCommentEditor(
         comment: text,
       });
     } else if (existingComment) {
-      // Empty text removes existing comment
+      // Empty text on an existing comment = delete.
       lineComments.delete(lineIndex);
     }
     editor.remove();
@@ -408,9 +374,6 @@ function createCommentEditor(
   textarea.focus();
 }
 
-/**
- * Main entry point: render a diff view into a parent element
- */
 export function renderDiffView(
   parentEl: HTMLElement,
   oldText: string,
@@ -427,7 +390,6 @@ export function renderDiffView(
   const lineComments = new Map<number, LineComment>();
 
   const container = parentEl.createDiv({ cls: "llm-hub-diff-view" });
-  let currentMode = opts.viewMode;
 
   const openCommentEditor = opts.enableComments
     ? (lineIndex: number, afterEl: HTMLElement) => {
@@ -441,22 +403,20 @@ export function renderDiffView(
   function rerender() {
     container.empty();
     container.className = "llm-hub-diff-view";
-    if (currentMode === "unified") {
+    if (state.viewMode === "unified") {
       renderUnifiedView(container, diffLines, linePairs, opts.enableComments, lineComments, openCommentEditor);
     } else {
       renderSplitView(container, diffLines, linePairs, opts.enableComments, lineComments, openCommentEditor);
     }
   }
 
-  rerender();
-
   const state: DiffRendererState = {
     container,
-    viewMode: currentMode,
+    viewMode: opts.viewMode,
     lineComments,
     onCommentsChange: null,
-    setViewMode(mode: "unified" | "split") {
-      currentMode = mode;
+    setViewMode(mode: DiffViewMode) {
+      if (state.viewMode === mode) return;
       state.viewMode = mode;
       rerender();
     },
@@ -465,12 +425,11 @@ export function renderDiffView(
     },
   };
 
+  rerender();
+
   return state;
 }
 
-/**
- * Format line comments as structured feedback for the LLM
- */
 export function formatLineComments(
   filePath: string,
   lineComments: Map<number, LineComment>
@@ -491,9 +450,6 @@ export function formatLineComments(
   return lines.join("\n");
 }
 
-/**
- * Create a Unified/Split view toggle and attach it to a DiffRendererState
- */
 export function createDiffViewToggle(
   parentEl: HTMLElement,
   state: DiffRendererState
@@ -501,25 +457,26 @@ export function createDiffViewToggle(
   const toggle = parentEl.createDiv({ cls: "llm-hub-diff-view-toggle" });
   const unifiedBtn = toggle.createEl("button", {
     text: t("diff.unifiedView"),
-    cls: `llm-hub-diff-view-toggle-btn${state.viewMode === "unified" ? " is-active" : ""}`,
+    cls: "llm-hub-diff-view-toggle-btn",
   });
   const splitBtn = toggle.createEl("button", {
     text: t("diff.splitView"),
-    cls: `llm-hub-diff-view-toggle-btn${state.viewMode === "split" ? " is-active" : ""}`,
+    cls: "llm-hub-diff-view-toggle-btn",
   });
 
+  const syncActive = () => {
+    unifiedBtn.toggleClass("is-active", state.viewMode === "unified");
+    splitBtn.toggleClass("is-active", state.viewMode === "split");
+  };
+
   unifiedBtn.addEventListener("click", () => {
-    if (state.viewMode !== "unified") {
-      state.setViewMode("unified");
-      unifiedBtn.addClass("is-active");
-      splitBtn.removeClass("is-active");
-    }
+    state.setViewMode("unified");
+    syncActive();
   });
   splitBtn.addEventListener("click", () => {
-    if (state.viewMode !== "split") {
-      state.setViewMode("split");
-      splitBtn.addClass("is-active");
-      unifiedBtn.removeClass("is-active");
-    }
+    state.setViewMode("split");
+    syncActive();
   });
+
+  syncActive();
 }

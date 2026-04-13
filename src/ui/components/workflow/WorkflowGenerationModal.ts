@@ -1,5 +1,6 @@
 import { App, Modal, MarkdownRenderer, Component } from "obsidian";
 import type { StreamChunkUsage } from "src/types";
+import { createCopyButton } from "src/utils/copyButton";
 import { t } from "src/i18n";
 
 export interface WorkflowGenerationResult {
@@ -537,17 +538,7 @@ export class WorkflowGenerationModal extends Modal {
       });
     }
 
-    const copyBtn = failureEl.createEl("button", {
-      text: t("message.copy"),
-      cls: "llm-hub-workflow-generation-copy-btn",
-    });
-    copyBtn.addEventListener("click", () => {
-      void navigator.clipboard.writeText(response).then(() => {
-        const original = copyBtn.textContent;
-        copyBtn.textContent = "✓";
-        setTimeout(() => { copyBtn.textContent = original; }, 1200);
-      });
-    });
+    createCopyButton(failureEl, () => response);
 
     const pre = failureEl.createEl("pre", { cls: "llm-hub-workflow-generation-parse-failure-body" });
     pre.textContent = response;

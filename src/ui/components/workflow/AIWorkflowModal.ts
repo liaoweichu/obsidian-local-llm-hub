@@ -12,6 +12,7 @@ import { showWorkflowPreview } from "./WorkflowPreviewModal";
 import { showExecutionHistorySelect } from "./ExecutionHistorySelectModal";
 import { ConfirmModal } from "../ConfirmModal";
 import { formatError } from "src/utils/error";
+import { createCopyButton } from "src/utils/copyButton";
 import { t, getLocale } from "src/i18n";
 
 export type AIWorkflowMode = "create" | "modify";
@@ -128,17 +129,7 @@ class WorkflowConfirmModal extends Modal {
       const header = explanationContainer.createDiv({ cls: "llm-hub-workflow-generation-section-header" });
       header.createEl("h3", { text: t("aiWorkflow.aiExplanation") });
       const explanation = this.explanation;
-      const copyBtn = header.createEl("button", {
-        cls: "llm-hub-workflow-generation-copy-btn",
-        text: t("message.copy"),
-      });
-      copyBtn.addEventListener("click", () => {
-        void navigator.clipboard.writeText(explanation).then(() => {
-          const original = copyBtn.textContent;
-          copyBtn.textContent = "✓";
-          setTimeout(() => { copyBtn.textContent = original; }, 1200);
-        });
-      });
+      createCopyButton(header, () => explanation);
       explanationContainer.createEl("p", { text: this.explanation });
     }
 
@@ -2271,19 +2262,7 @@ export function renderGenerationContext(
     if (defaultOpen && section.kind === "markdown") details.setAttr("open", "");
     const summary = details.createEl("summary");
     summary.createSpan({ text: section.label });
-    const copyBtn = summary.createEl("button", {
-      cls: "llm-hub-workflow-generation-copy-btn",
-      text: t("message.copy"),
-    });
-    copyBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      e.preventDefault();
-      void navigator.clipboard.writeText(section.content).then(() => {
-        const original = copyBtn.textContent;
-        copyBtn.textContent = "✓";
-        setTimeout(() => { copyBtn.textContent = original; }, 1200);
-      });
-    });
+    createCopyButton(summary, () => section.content);
     if (section.kind === "markdown") {
       const mdContainer = details.createDiv({ cls: "llm-hub-workflow-generation-context-content llm-hub-workflow-generation-plan-rendered" });
       void MarkdownRenderer.render(app, section.content, mdContainer, "/", component);
