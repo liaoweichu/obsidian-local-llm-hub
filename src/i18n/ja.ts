@@ -509,6 +509,21 @@ export const ja: Record<string, string> = {
   "workflow.preview.referenceHistory": "実行履歴を参照",
   "workflow.preview.stepsSelected": "{{count}}ステップをコンテキストとして選択",
 
+  // Diff viewer (workflow confirm modal)
+  "diff.unifiedView": "統合",
+  "diff.splitView": "分割",
+  "diff.commentPlaceholder": "この行についてのコメントを追加...",
+  "diff.saveComment": "保存",
+  "diff.cancelComment": "キャンセル",
+  "diff.removeComment": "削除",
+  "diff.lineComments": "行コメント",
+  "diff.lineCommentsCount": "{{count}} 件の行コメント",
+  "diff.generalFeedback": "全体のフィードバック（任意）",
+  "diff.applyWithCommentsConfirm": "未送信の行コメントがあります。コメントを無視して変更を適用しますか？",
+
+  "workflowModal.changes": "変更内容",
+  "message.requestChanges": "変更を依頼",
+
   // Workflow history select
   "workflow.historySelect.title": "実行履歴を選択",
   "workflow.historySelect.recentExecutions": "最近の実行",

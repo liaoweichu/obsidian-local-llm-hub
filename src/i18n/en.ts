@@ -460,6 +460,21 @@ export const en = {
   "workflow.preview.regenerate": "Send",
   "workflow.preview.ok": "Apply",
 
+  // Diff viewer (workflow confirm modal)
+  "diff.unifiedView": "Unified",
+  "diff.splitView": "Split",
+  "diff.commentPlaceholder": "Add your comment about this line...",
+  "diff.saveComment": "Save",
+  "diff.cancelComment": "Cancel",
+  "diff.removeComment": "Remove",
+  "diff.lineComments": "Line comments",
+  "diff.lineCommentsCount": "{{count}} line comment(s)",
+  "diff.generalFeedback": "General feedback (optional)",
+  "diff.applyWithCommentsConfirm": "You have line comments that haven't been submitted. Apply changes anyway?",
+
+  "workflowModal.changes": "Changes",
+  "message.requestChanges": "Request changes",
+
   // Workflow history select
   "workflow.historySelect.title": "Select execution history",
   "workflow.historySelect.recentExecutions": "Recent executions",

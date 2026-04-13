@@ -6,7 +6,7 @@ import { WORKFLOW_SPECIFICATION } from "src/workflow/workflowSpec";
 import type { SidebarNode, WorkflowNodeType, ExecutionStep } from "src/workflow/types";
 import { listWorkflowOptions, normalizeYamlText } from "src/workflow/parser";
 import { ExecutionHistoryManager } from "src/workflow/history";
-import { computeLineDiff } from "./EditConfirmationModal";
+import { renderDiffView, createDiffViewToggle, formatLineComments, type DiffRendererState } from "./DiffRenderer";
 import { WorkflowGenerationModal } from "./WorkflowGenerationModal";
 import { showWorkflowPreview } from "./WorkflowPreviewModal";
 import { showExecutionHistorySelect } from "./ExecutionHistorySelectModal";
@@ -83,9 +83,8 @@ class WorkflowConfirmModal extends Modal {
   private isSkill: boolean;
   private resolvePromise: (result: WorkflowConfirmResult) => void;
   private additionalRequestEl: HTMLTextAreaElement | null = null;
-  private additionalRequestContainerEl: HTMLElement | null = null;
-  private isShowingAdditionalRequest = false;
   private markdownComponent: Component | null = null;
+  private diffState: DiffRendererState | null = null;
 
   constructor(
     app: App,
@@ -120,58 +119,60 @@ class WorkflowConfirmModal extends Modal {
     });
     this.setupDragHandle(dragHandle, modalEl);
 
-    // Explanation section (if available)
+    // Scrollable middle area holds everything that can grow (explanation +
+    // diff + generation context) so the textarea and buttons stay pinned.
+    const scrollable = contentEl.createDiv({ cls: "llm-hub-workflow-confirm-scrollable" });
+
     if (this.explanation) {
-      const explanationContainer = contentEl.createDiv({ cls: "llm-hub-workflow-explanation" });
-      explanationContainer.createEl("h3", { text: t("aiWorkflow.aiExplanation") });
+      const explanationContainer = scrollable.createDiv({ cls: "llm-hub-workflow-explanation" });
+      const header = explanationContainer.createDiv({ cls: "llm-hub-workflow-generation-section-header" });
+      header.createEl("h3", { text: t("aiWorkflow.aiExplanation") });
+      const explanation = this.explanation;
+      const copyBtn = header.createEl("button", {
+        cls: "llm-hub-workflow-generation-copy-btn",
+        text: t("message.copy"),
+      });
+      copyBtn.addEventListener("click", () => {
+        void navigator.clipboard.writeText(explanation).then(() => {
+          const original = copyBtn.textContent;
+          copyBtn.textContent = "✓";
+          setTimeout(() => { copyBtn.textContent = original; }, 1200);
+        });
+      });
       explanationContainer.createEl("p", { text: this.explanation });
     }
 
-    // Create diff view
-    const diffContainer = contentEl.createDiv({ cls: "llm-hub-diff-view" });
-    const diffLines = computeLineDiff(this.oldYaml, this.newYaml);
-
-    for (const line of diffLines) {
-      const lineEl = diffContainer.createDiv({
-        cls: `llm-hub-diff-line llm-hub-diff-${line.type}`,
-      });
-
-      // Line number gutter
-      const gutterEl = lineEl.createSpan({ cls: "llm-hub-diff-gutter" });
-      if (line.type === "removed") {
-        gutterEl.textContent = "-";
-      } else if (line.type === "added") {
-        gutterEl.textContent = "+";
-      } else {
-        gutterEl.textContent = " ";
-      }
-
-      // Content
-      const contentSpan = lineEl.createSpan({ cls: "llm-hub-diff-content" });
-      contentSpan.textContent = line.content;
-    }
+    const diffLabel = scrollable.createDiv({ cls: "llm-hub-edit-confirm-preview-label" });
+    diffLabel.createEl("span", { text: t("workflowModal.changes") });
+    const diffWrapper = scrollable.createDiv({ cls: "llm-hub-workflow-confirm-diff-wrapper llm-hub-workflow-confirm-diff" });
+    this.diffState = renderDiffView(diffWrapper, this.oldYaml, this.newYaml, {
+      enableComments: true,
+    });
+    createDiffViewToggle(diffLabel, this.diffState);
 
     this.markdownComponent = new Component();
     this.markdownComponent.load();
     // Diff is primary content in the confirm modal — keep plan/review collapsed.
-    renderGenerationContext(contentEl, this.generationContext, this.app, this.markdownComponent, { defaultOpen: false });
+    renderGenerationContext(scrollable, this.generationContext, this.app, this.markdownComponent, { defaultOpen: false });
 
-    // Additional request container (hidden initially)
-    this.additionalRequestContainerEl = contentEl.createDiv({
-      cls: "llm-hub-workflow-preview-additional is-hidden"
+    // Feedback textarea (always visible, pinned below scrollable)
+    const additionalRequestContainer = contentEl.createDiv({
+      cls: "llm-hub-workflow-preview-additional",
     });
-    this.additionalRequestContainerEl.createEl("label", {
-      text: t("workflow.preview.additionalRequest")
+    additionalRequestContainer.createEl("label", {
+      text: t("workflow.preview.additionalRequest"),
     });
-    this.additionalRequestEl = this.additionalRequestContainerEl.createEl("textarea", {
+    this.additionalRequestEl = additionalRequestContainer.createEl("textarea", {
       cls: "llm-hub-workflow-preview-additional-input",
       attr: {
         placeholder: t("workflow.preview.additionalPlaceholder"),
-        rows: "3"
+        rows: "3",
       },
     });
+    if (this.previousRequest) {
+      this.additionalRequestEl.value = this.previousRequest;
+    }
 
-    // Buttons
     const buttonContainer = contentEl.createDiv({ cls: "llm-hub-workflow-buttons" });
 
     const cancelBtn = buttonContainer.createEl("button", { text: t("workflow.preview.cancel") });
@@ -180,28 +181,33 @@ class WorkflowConfirmModal extends Modal {
       this.close();
     });
 
-    const noBtn = buttonContainer.createEl("button", { text: t("workflow.preview.no") });
-    noBtn.addEventListener("click", () => {
-      if (!this.isShowingAdditionalRequest) {
-        // First click: show additional request input with previous request pre-filled
-        this.isShowingAdditionalRequest = true;
-        this.additionalRequestContainerEl?.removeClass("is-hidden");
-        if (this.additionalRequestEl && this.previousRequest) {
-          this.additionalRequestEl.value = this.previousRequest;
-        }
-        this.additionalRequestEl?.focus();
-        noBtn.textContent = t("workflow.preview.regenerate");
-        noBtn.addClass("mod-cta");
-        applyBtn.removeClass("mod-cta");
-      } else {
-        // Second click: submit with additional request
-        const additionalRequest = this.additionalRequestEl?.value?.trim() || "";
-        this.resolvePromise({
-          result: "no",
-          additionalRequest,
-        });
-        this.close();
-      }
+    const requestChangesBtn = buttonContainer.createEl("button", {
+      text: t("message.requestChanges"),
+      cls: "mod-warning",
+    });
+    const updateRequestChangesState = () => {
+      const hasComments = this.diffState ? this.diffState.lineComments.size > 0 : false;
+      const hasText = !!this.additionalRequestEl?.value?.trim();
+      requestChangesBtn.disabled = !hasComments && !hasText;
+    };
+    requestChangesBtn.disabled = !this.previousRequest?.trim();
+    if (this.diffState) {
+      this.diffState.onCommentsChange = () => updateRequestChangesState();
+    }
+    this.additionalRequestEl.addEventListener("input", () => updateRequestChangesState());
+    requestChangesBtn.addEventListener("click", () => {
+      const generalFeedback = this.additionalRequestEl?.value?.trim() || "";
+      const lineCommentsFeedback = this.diffState
+        ? formatLineComments("workflow", this.diffState.lineComments)
+        : "";
+      const parts: string[] = [];
+      if (lineCommentsFeedback) parts.push(lineCommentsFeedback);
+      if (generalFeedback) parts.push(generalFeedback);
+      this.resolvePromise({
+        result: "no",
+        additionalRequest: parts.join("\n"),
+      });
+      this.close();
     });
 
     const applyBtn = buttonContainer.createEl("button", {
@@ -266,6 +272,10 @@ class WorkflowConfirmModal extends Modal {
     if (this.markdownComponent) {
       this.markdownComponent.unload();
       this.markdownComponent = null;
+    }
+    if (this.diffState) {
+      this.diffState.destroy();
+      this.diffState = null;
     }
     const { contentEl } = this;
     contentEl.empty();
