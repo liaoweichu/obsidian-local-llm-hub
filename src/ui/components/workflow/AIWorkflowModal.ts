@@ -78,30 +78,37 @@ function getLanguageName(): string {
 class WorkflowConfirmModal extends Modal {
   private oldYaml: string;
   private newYaml: string;
+  private oldInstructions?: string;
+  private newInstructions?: string;
   private explanation?: string;
-  private previousRequest: string;
+  private currentRequest: string;
   private generationContext: GenerationContext;
   private isSkill: boolean;
   private resolvePromise: (result: WorkflowConfirmResult) => void;
   private additionalRequestEl: HTMLTextAreaElement | null = null;
   private markdownComponent: Component | null = null;
   private diffState: DiffRendererState | null = null;
+  private instructionsDiffState: DiffRendererState | null = null;
 
   constructor(
     app: App,
     oldYaml: string,
     newYaml: string,
     explanation: string | undefined,
-    previousRequest: string,
+    currentRequest: string,
     generationContext: GenerationContext,
     isSkill: boolean,
-    resolvePromise: (result: WorkflowConfirmResult) => void
+    resolvePromise: (result: WorkflowConfirmResult) => void,
+    oldInstructions?: string,
+    newInstructions?: string
   ) {
     super(app);
     this.oldYaml = oldYaml;
     this.newYaml = newYaml;
+    this.oldInstructions = oldInstructions;
+    this.newInstructions = newInstructions;
     this.explanation = explanation;
-    this.previousRequest = previousRequest;
+    this.currentRequest = currentRequest;
     this.generationContext = generationContext;
     this.isSkill = isSkill;
     this.resolvePromise = resolvePromise;
@@ -124,6 +131,12 @@ class WorkflowConfirmModal extends Modal {
     // diff + generation context) so the textarea and buttons stay pinned.
     const scrollable = contentEl.createDiv({ cls: "llm-hub-workflow-confirm-scrollable" });
 
+    if (this.currentRequest?.trim()) {
+      const requestContainer = scrollable.createDiv({ cls: "llm-hub-workflow-user-request" });
+      requestContainer.createEl("h3", { text: t("workflow.generation.yourRequest") });
+      requestContainer.createEl("p", { text: this.currentRequest });
+    }
+
     if (this.explanation) {
       const explanationContainer = scrollable.createDiv({ cls: "llm-hub-workflow-explanation" });
       const header = explanationContainer.createDiv({ cls: "llm-hub-workflow-generation-section-header" });
@@ -133,13 +146,46 @@ class WorkflowConfirmModal extends Modal {
       explanationContainer.createEl("p", { text: this.explanation });
     }
 
+    const showInstructions = this.isSkill
+      && this.oldInstructions !== undefined
+      && this.newInstructions !== undefined;
+    const instructionsChanged = showInstructions && this.oldInstructions !== this.newInstructions;
+
+    if (showInstructions) {
+      const instrLabel = scrollable.createDiv({ cls: "llm-hub-edit-confirm-preview-label" });
+      instrLabel.createEl("span", { text: t("workflowModal.skillInstructionsChanges") });
+      if (instructionsChanged) {
+        const instrWrapper = scrollable.createDiv({ cls: "llm-hub-workflow-confirm-diff-wrapper" });
+        this.instructionsDiffState = renderDiffView(
+          instrWrapper,
+          this.oldInstructions ?? "",
+          this.newInstructions ?? "",
+          { enableComments: false, viewMode: "unified" }
+        );
+        createDiffViewToggle(instrLabel, this.instructionsDiffState);
+      } else {
+        scrollable.createDiv({
+          cls: "llm-hub-workflow-confirm-no-changes",
+          text: t("workflowModal.noChanges"),
+        });
+      }
+    }
+
+    const yamlChanged = this.oldYaml !== this.newYaml;
     const diffLabel = scrollable.createDiv({ cls: "llm-hub-edit-confirm-preview-label" });
     diffLabel.createEl("span", { text: t("workflowModal.changes") });
-    const diffWrapper = scrollable.createDiv({ cls: "llm-hub-workflow-confirm-diff-wrapper llm-hub-workflow-confirm-diff" });
-    this.diffState = renderDiffView(diffWrapper, this.oldYaml, this.newYaml, {
-      enableComments: true,
-    });
-    createDiffViewToggle(diffLabel, this.diffState);
+    if (yamlChanged) {
+      const diffWrapper = scrollable.createDiv({ cls: "llm-hub-workflow-confirm-diff-wrapper llm-hub-workflow-confirm-diff" });
+      this.diffState = renderDiffView(diffWrapper, this.oldYaml, this.newYaml, {
+        enableComments: true,
+      });
+      createDiffViewToggle(diffLabel, this.diffState);
+    } else {
+      scrollable.createDiv({
+        cls: "llm-hub-workflow-confirm-no-changes",
+        text: t("workflowModal.noChanges"),
+      });
+    }
 
     this.markdownComponent = new Component();
     this.markdownComponent.load();
@@ -160,9 +206,6 @@ class WorkflowConfirmModal extends Modal {
         rows: "3",
       },
     });
-    if (this.previousRequest) {
-      this.additionalRequestEl.value = this.previousRequest;
-    }
 
     const buttonContainer = contentEl.createDiv({ cls: "llm-hub-workflow-buttons" });
 
@@ -181,11 +224,11 @@ class WorkflowConfirmModal extends Modal {
       const hasText = !!this.additionalRequestEl?.value?.trim();
       requestChangesBtn.disabled = !hasComments && !hasText;
     };
-    requestChangesBtn.disabled = !this.previousRequest?.trim();
     if (this.diffState) {
       this.diffState.onCommentsChange = () => updateRequestChangesState();
     }
     this.additionalRequestEl.addEventListener("input", () => updateRequestChangesState());
+    updateRequestChangesState();
     requestChangesBtn.addEventListener("click", () => {
       const generalFeedback = this.additionalRequestEl?.value?.trim() || "";
       const lineCommentsFeedback = this.diffState
@@ -268,6 +311,10 @@ class WorkflowConfirmModal extends Modal {
       this.diffState.destroy();
       this.diffState = null;
     }
+    if (this.instructionsDiffState) {
+      this.instructionsDiffState.destroy();
+      this.instructionsDiffState = null;
+    }
     const { contentEl } = this;
     contentEl.empty();
   }
@@ -279,13 +326,16 @@ function showWorkflowConfirmation(
   oldYaml: string,
   newYaml: string,
   explanation: string | undefined,
-  previousRequest: string,
+  currentRequest: string,
   generationContext: GenerationContext,
-  isSkill: boolean
+  isSkill: boolean,
+  oldInstructions?: string,
+  newInstructions?: string
 ): Promise<WorkflowConfirmResult> {
   return new Promise((resolve) => {
     const modal = new WorkflowConfirmModal(
-      app, oldYaml, newYaml, explanation, previousRequest, generationContext, isSkill, resolve
+      app, oldYaml, newYaml, explanation, currentRequest, generationContext, isSkill, resolve,
+      oldInstructions, newInstructions
     );
     modal.open();
   });
@@ -1177,7 +1227,9 @@ Fix the problem and output ONLY the complete, valid YAML workflow starting with 
           result.explanation,
           currentRequest,
           generationContext,
-          this.forceSkill
+          this.forceSkill,
+          this.forceSkill ? this.existingInstructions : undefined,
+          this.forceSkill ? result.skillInstructions : undefined,
         );
 
         if (confirmResult.result === "ok") {

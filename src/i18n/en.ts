@@ -472,7 +472,9 @@ export const en = {
   "diff.generalFeedback": "General feedback (optional)",
   "diff.applyWithCommentsConfirm": "You have line comments that haven't been submitted. Apply changes anyway?",
 
-  "workflowModal.changes": "Changes",
+  "workflowModal.changes": "Workflow YAML changes",
+  "workflowModal.skillInstructionsChanges": "SKILL.md instructions changes",
+  "workflowModal.noChanges": "No changes",
   "message.requestChanges": "Request changes",
 
   // Workflow history select

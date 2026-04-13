@@ -6210,3 +6210,40 @@ body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) 
 .llm-hub-workflow-confirm-modal .llm-hub-edit-confirm-preview-label {
   flex-shrink: 0;
 }
+
+
+/* Shown under a section label in the confirm modal when old === new */
+.llm-hub-workflow-confirm-no-changes {
+  padding: 8px 12px;
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: 4px;
+  background: var(--background-secondary);
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* User's original request, shown read-only near the top of the confirm modal */
+.llm-hub-workflow-user-request {
+  padding: 10px 12px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  user-select: text;
+}
+
+.llm-hub-workflow-user-request h3 {
+  margin: 0 0 6px 0;
+  font-size: 13px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.llm-hub-workflow-user-request p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-normal);
+}

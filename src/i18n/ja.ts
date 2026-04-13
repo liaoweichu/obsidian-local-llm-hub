@@ -521,7 +521,9 @@ export const ja: Record<string, string> = {
   "diff.generalFeedback": "全体のフィードバック（任意）",
   "diff.applyWithCommentsConfirm": "未送信の行コメントがあります。コメントを無視して変更を適用しますか？",
 
-  "workflowModal.changes": "変更内容",
+  "workflowModal.changes": "ワークフロー YAML の変更",
+  "workflowModal.skillInstructionsChanges": "SKILL.md 指示の変更",
+  "workflowModal.noChanges": "変更なし",
   "message.requestChanges": "変更を依頼",
 
   // Workflow history select
