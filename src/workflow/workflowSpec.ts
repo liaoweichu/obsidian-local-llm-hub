@@ -1,7 +1,15 @@
 // Workflow specification for AI generation
 // This is used as a system prompt when the LLM generates or modifies workflows
 
-export function getWorkflowSpecification(): string {
+import type { McpServerConfig, ToolDefinition } from "src/types";
+import type { LocalLlmHubPlugin } from "src/plugin";
+
+export interface WorkflowSpecContext {
+  mcpServers: McpServerConfig[];
+  ragSettingNames: string[];
+}
+
+export function getWorkflowSpecification(_context?: WorkflowSpecContext): string {
   return `
 # Obsidian Workflow Specification
 
@@ -463,3 +471,112 @@ values to the user, guided by the SKILL.md instructions.
 }
 
 export const WORKFLOW_SPECIFICATION = getWorkflowSpecification();
+
+/**
+ * Return workflow spec content. If `nodeTypes` is empty/undefined, returns the
+ * full spec. Otherwise extracts just the `#### nodeType` sections requested.
+ */
+export function getWorkflowNodeSpec(
+  nodeTypes: string[] | undefined,
+  context?: WorkflowSpecContext,
+): string {
+  const fullSpec = getWorkflowSpecification(context);
+  if (!nodeTypes || nodeTypes.length === 0) return fullSpec;
+
+  const sectionMap = new Map<string, string>();
+  const headerRe = /^#### (\S+)[^\n]*$/gm;
+  const headers: { name: string; start: number; bodyStart: number }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = headerRe.exec(fullSpec)) !== null) {
+    headers.push({ name: m[1], start: m.index, bodyStart: m.index + m[0].length });
+  }
+  // A section ends at the next `^## ` / `^### ` / `^#### ` heading or EOF.
+  const boundaryRe = /^#{2,4} /gm;
+  for (const h of headers) {
+    boundaryRe.lastIndex = h.bodyStart;
+    let end = fullSpec.length;
+    let bm: RegExpExecArray | null;
+    while ((bm = boundaryRe.exec(fullSpec)) !== null) {
+      if (bm.index > h.bodyStart) {
+        end = bm.index;
+        break;
+      }
+    }
+    sectionMap.set(h.name, fullSpec.slice(h.start, end).replace(/\s+$/, ""));
+  }
+
+  const sections: string[] = [];
+  for (const raw of nodeTypes) {
+    const nodeType = raw.trim();
+    if (!nodeType) continue;
+    const found = sectionMap.get(nodeType);
+    if (found) {
+      sections.push(found);
+    } else {
+      sections.push(`#### ${nodeType}\n(unknown node type — verify the name in the workflow spec)`);
+    }
+  }
+  return sections.join("\n\n");
+}
+
+/**
+ * Tool definition for looking up workflow spec sections from the chat LLM.
+ * Useful when the user asks what a workflow node does, why one is failing, or
+ * to have the LLM explain a workflow YAML they pasted in.
+ *
+ * `nodeTypes` is declared as a JSON-string parameter (rather than an array)
+ * to match the plugin's OpenAI-compatible ToolDefinition shape; the handler
+ * accepts both a JSON array string and a raw array value just in case.
+ */
+export const GET_WORKFLOW_SPEC_TOOL_NAME = "get_workflow_spec";
+
+export const GET_WORKFLOW_SPEC_TOOL: ToolDefinition = {
+  type: "function",
+  function: {
+    name: GET_WORKFLOW_SPEC_TOOL_NAME,
+    description:
+      "Return the Obsidian workflow specification. If nodeTypes is provided (as a JSON array string, e.g. '[\"command\",\"http\"]'), returns only the `#### <nodeType>` sections for those node types. If nodeTypes is omitted or empty, returns the full workflow spec. Use this to look up authoritative parameter docs before explaining, debugging, or writing workflow YAML.",
+    parameters: {
+      type: "object",
+      properties: {
+        nodeTypes: {
+          type: "string",
+          description: "Optional JSON array of node type names (e.g. '[\"command\",\"http\"]'). Omit or pass an empty string to get the full spec.",
+        },
+      },
+    },
+  },
+};
+
+/** Build the spec context from the plugin's current settings & workspace state. */
+export function buildWorkflowSpecContext(plugin: LocalLlmHubPlugin): WorkflowSpecContext {
+  return {
+    mcpServers: plugin.settings.mcpServers,
+    ragSettingNames: Object.keys(plugin.wsManager.workspaceState.ragSettings),
+  };
+}
+
+/**
+ * Handler for `get_workflow_spec` tool calls. Accepts `nodeTypes` as either
+ * an array (some model runtimes coerce it) or a JSON-encoded array string.
+ */
+export function handleGetWorkflowSpec(
+  args: Record<string, unknown>,
+  plugin: LocalLlmHubPlugin,
+): string {
+  const raw = args.nodeTypes;
+  let nodeTypes: string[] | undefined;
+  if (Array.isArray(raw)) {
+    nodeTypes = raw.filter((v): v is string => typeof v === "string");
+  } else if (typeof raw === "string" && raw.trim().startsWith("[")) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        nodeTypes = parsed.filter((v): v is string => typeof v === "string");
+      }
+    } catch {
+      // fall through — full spec
+    }
+  }
+  return getWorkflowNodeSpec(nodeTypes, buildWorkflowSpecContext(plugin));
+}

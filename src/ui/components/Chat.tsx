@@ -21,6 +21,7 @@ import { localLlmChatStream } from "src/core/localLlmProvider";
 import { getVaultTools, skillWorkflowTool, SKILL_WORKFLOW_TOOL_NAME } from "src/core/tools";
 import { EXECUTE_JAVASCRIPT_TOOL } from "src/core/sandboxExecutor";
 import { executeToolCall } from "src/core/toolExecutor";
+import { GET_WORKFLOW_SPEC_TOOL, GET_WORKFLOW_SPEC_TOOL_NAME, handleGetWorkflowSpec } from "src/workflow/workflowSpec";
 import { getRagStore } from "src/core/ragStore";
 import { discoverSkills, loadSkill, buildSkillSystemPrompt, collectSkillWorkflows, type SkillMetadata, type LoadedSkill, type SkillWorkflowRef } from "src/core/skillsLoader";
 import { DEFAULT_BUILTIN_SKILL_IDS, builtinFolderPath, getBuiltinSkillMetadata } from "src/core/builtinSkills";
@@ -623,9 +624,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({ plugin }, ref) => {
         : activeSkillPaths;
       if (effectiveSkillPaths.length > 0) {
         const activeMetadata = availableSkills.filter(s => effectiveSkillPaths.includes(s.folderPath));
-        loadedSkillsList = await Promise.all(
-          activeMetadata.map(m => loadSkill(plugin.app, m))
-        );
+        loadedSkillsList = activeMetadata.map(m => loadSkill(plugin.app, m));
         const skillPrompt = buildSkillSystemPrompt(loadedSkillsList);
         if (skillPrompt) {
           systemPrompt += skillPrompt;
@@ -656,6 +655,12 @@ const Chat = forwardRef<ChatRef, ChatProps>(({ plugin }, ref) => {
       // Add execute_javascript tool
       if (vaultToolMode !== "none" && !isAnythingLlm) {
         tools.push(EXECUTE_JAVASCRIPT_TOOL);
+      }
+
+      // Workflow spec lookup tool — enables the LLM to fetch authoritative
+      // node docs on demand (e.g. when debugging workflows or generating YAML).
+      if (!isAnythingLlm) {
+        tools.push(GET_WORKFLOW_SPEC_TOOL);
       }
 
       // Conversation messages for the API (includes tool call/result messages)
@@ -737,18 +742,20 @@ const Chat = forwardRef<ChatRef, ChatProps>(({ plugin }, ref) => {
         for (const tc of pendingToolCalls) {
           setStreamingContent(fullContent + `\n\n🔧 ${tc.name}...`);
 
-          const result = await executeToolCall(tc, {
-            app: plugin.app,
-            mcpManager: plugin.mcpManager,
-            onProposeEdit: async (path, oldContent, newContent) => {
-              const modal = new EditConfirmationModal(plugin.app, path, newContent, "overwrite", oldContent);
-              const response = await modal.openAndWait();
-              return response.action === "save";
-            },
-            onRunSkillWorkflow: skillWorkflowMap.size > 0
-              ? (workflowId, variablesJson) => executeSkillWorkflow(plugin, workflowId, variablesJson, skillWorkflowMap)
-              : undefined,
-          });
+          const result = tc.name === GET_WORKFLOW_SPEC_TOOL_NAME
+            ? { success: true, result: handleGetWorkflowSpec(tc.arguments, plugin) }
+            : await executeToolCall(tc, {
+              app: plugin.app,
+              mcpManager: plugin.mcpManager,
+              onProposeEdit: async (path, oldContent, newContent) => {
+                const modal = new EditConfirmationModal(plugin.app, path, newContent, "overwrite", oldContent);
+                const response = await modal.openAndWait();
+                return response.action === "save";
+              },
+              onRunSkillWorkflow: skillWorkflowMap.size > 0
+                ? (workflowId, variablesJson) => executeSkillWorkflow(plugin, workflowId, variablesJson, skillWorkflowMap)
+                : undefined,
+            });
           const toolResultMsg: Message = {
             role: "tool",
             content: result.result,

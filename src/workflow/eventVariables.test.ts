@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ALL_EVENT_VARIABLE_NAMES, getEventVariable, setEventVariable } from "./eventVariables";
-import { extractInputVariables } from "src/core/skillsLoader";
+import { extractInputVariables } from "./inputVariables";
+import type { SidebarNode } from "./types";
 
 describe("eventVariables", () => {
   it("sets both current and legacy event variable names", () => {
@@ -28,14 +29,17 @@ describe("eventVariables", () => {
 
 describe("extractInputVariables", () => {
   it("does not treat legacy event variables as required workflow inputs", () => {
-    const workflow = `name: legacy-event-workflow
-nodes:
-  - id: save
-    type: note
-    path: "{{__eventFilePath__}}"
-    content: "{{__eventFileContent__}}"
-    mode: overwrite`;
-
-    expect(extractInputVariables(workflow)).toEqual([]);
+    const nodes: SidebarNode[] = [
+      {
+        id: "save",
+        type: "note",
+        properties: {
+          path: "{{__eventFilePath__}}",
+          content: "{{__eventFileContent__}}",
+          mode: "overwrite",
+        },
+      },
+    ];
+    expect(extractInputVariables(nodes)).toEqual([]);
   });
 });
