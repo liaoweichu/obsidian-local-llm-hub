@@ -692,6 +692,10 @@ const Chat = forwardRef<ChatRef, ChatProps>(({ plugin }, ref) => {
               fullContent += chunk.content || "";
               setStreamingContent(fullContent);
               break;
+            case "replace_text":
+              fullContent = chunk.content || "";
+              setStreamingContent(fullContent);
+              break;
             case "thinking":
               thinkingContent += chunk.content || "";
               setStreamingThinking(thinkingContent);

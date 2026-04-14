@@ -128,6 +128,8 @@ Please revise the output based on the user's feedback above.`;
     )) {
       if (chunk.type === "text") {
         fullResponse += chunk.content || "";
+      } else if (chunk.type === "replace_text") {
+        fullResponse = chunk.content || "";
       } else if (chunk.type === "thinking") {
         thinkingContent += chunk.content || "";
         promptCallbacks?.onThinking?.(node.id, thinkingContent);

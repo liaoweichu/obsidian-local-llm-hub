@@ -214,9 +214,15 @@ export async function* localLlmChatStream(
     }
     if (chunk.type === "done") {
       if (!sawNativeToolCall && accumulatedText.trim()) {
-        const { toolCalls } = extractInlineToolCalls(accumulatedText, activeTools);
-        for (const toolCall of toolCalls) {
-          yield { type: "tool_call", toolCall };
+        const { toolCalls, cleanedText } = extractInlineToolCalls(accumulatedText, activeTools);
+        if (toolCalls.length > 0) {
+          // Tell the consumer to drop the raw JSON we already streamed; emit
+          // this before the tool_call chunks so any UI that echoes the
+          // accumulated text alongside the tool call sees the cleaned version.
+          yield { type: "replace_text", content: cleanedText };
+          for (const toolCall of toolCalls) {
+            yield { type: "tool_call", toolCall };
+          }
         }
       }
       yield chunk;
