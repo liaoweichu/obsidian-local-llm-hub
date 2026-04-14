@@ -12,6 +12,7 @@
 
 import { requestUrl } from "obsidian";
 import type { Message, StreamChunk, LocalLlmConfig, ToolDefinition, ToolCall } from "../types";
+import { extractInlineToolCalls } from "./toolCallParser";
 
 // OpenAI-compatible API types
 interface OpenAiMessage {
@@ -183,10 +184,51 @@ export async function* localLlmChatStream(
   tools?: ToolDefinition[],
 ): AsyncGenerator<StreamChunk> {
   const activeTools = tools && tools.length > 0 ? tools : undefined;
-  if (config.framework === "ollama") {
-    yield* ollamaChatStream(config, messages, systemPrompt, signal, activeTools);
-  } else {
-    yield* openaiChatStream(config, messages, systemPrompt, signal, activeTools);
+  const inner = config.framework === "ollama"
+    ? ollamaChatStream(config, messages, systemPrompt, signal, activeTools)
+    : openaiChatStream(config, messages, systemPrompt, signal, activeTools);
+
+  if (!activeTools) {
+    yield* inner;
+    return;
+  }
+
+  // Fallback: some small local models (e.g. llama3.1:8b, mistral 7b) emit
+  // tool calls as JSON text in `content` instead of via the structured
+  // `tool_calls` field. If the stream finishes without any native tool call
+  // but the text looks like one, parse it and synthesize tool_call chunks so
+  // the caller can still dispatch the tool. See issue #9.
+  let accumulatedText = "";
+  let sawNativeToolCall = false;
+
+  for await (const chunk of inner) {
+    if (chunk.type === "text" && chunk.content) {
+      accumulatedText += chunk.content;
+      yield chunk;
+      continue;
+    }
+    if (chunk.type === "tool_call") {
+      sawNativeToolCall = true;
+      yield chunk;
+      continue;
+    }
+    if (chunk.type === "done") {
+      if (!sawNativeToolCall && accumulatedText.trim()) {
+        const { toolCalls, cleanedText } = extractInlineToolCalls(accumulatedText, activeTools);
+        if (toolCalls.length > 0) {
+          // Tell the consumer to drop the raw JSON we already streamed; emit
+          // this before the tool_call chunks so any UI that echoes the
+          // accumulated text alongside the tool call sees the cleaned version.
+          yield { type: "replace_text", content: cleanedText };
+          for (const toolCall of toolCalls) {
+            yield { type: "tool_call", toolCall };
+          }
+        }
+      }
+      yield chunk;
+      continue;
+    }
+    yield chunk;
   }
 }
 

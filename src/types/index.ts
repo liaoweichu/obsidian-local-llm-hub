@@ -145,7 +145,10 @@ export interface StreamChunkUsage {
 
 // Streaming chunk types
 export interface StreamChunk {
-  type: "text" | "thinking" | "tool_call" | "error" | "done";
+  // `replace_text` instructs the consumer to overwrite the accumulated text
+  // buffer with `content`. Used to strip inline tool-call JSON out of the
+  // visible response after it has already been streamed.
+  type: "text" | "thinking" | "tool_call" | "error" | "done" | "replace_text";
   content?: string;
   toolCall?: ToolCall;
   error?: string;
