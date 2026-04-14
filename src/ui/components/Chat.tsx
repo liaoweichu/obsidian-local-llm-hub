@@ -299,19 +299,22 @@ const Chat = forwardRef<ChatRef, ChatProps>(({ plugin }, ref) => {
       resolved = resolved.replace(/\{content\}/g, noteContent || "(no active note)");
     }
 
-    // Resolve file references (bare file paths from @ mentions)
-    const filePathPattern = /(?:^|\s)([^\s]+\.md)(?:\s|$)/g;
-    let match;
-    while ((match = filePathPattern.exec(resolved)) !== null) {
-      const filePath = match[1];
-      const file = plugin.app.vault.getAbstractFileByPath(filePath);
-      if (file instanceof TFile) {
-        try {
-          const content = await plugin.app.vault.cachedRead(file);
-          resolved = resolved.replace(filePath, `From "${filePath}":\n${content}`);
-        } catch {
-          // File read failed, leave as-is
-        }
+    // Resolve file references (bare file paths from @ mentions).
+    // Walk through actual vault files so that paths containing spaces match
+    // too. Sort by length descending so that longer paths are matched first
+    // (avoids partial matches of shorter ones).
+    const mdFiles = plugin.app.vault.getMarkdownFiles()
+      .slice()
+      .sort((a, b) => b.path.length - a.path.length);
+    for (const file of mdFiles) {
+      if (!resolved.includes(file.path)) continue;
+      try {
+        const content = await plugin.app.vault.cachedRead(file);
+        // Only replace the first occurrence to avoid recursive expansion if
+        // the content itself mentions another note path.
+        resolved = resolved.replace(file.path, `From "${file.path}":\n${content}`);
+      } catch {
+        // File read failed, leave as-is
       }
     }
 
