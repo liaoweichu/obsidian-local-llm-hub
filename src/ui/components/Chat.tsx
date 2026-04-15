@@ -46,6 +46,7 @@ import MessageList from "./MessageList";
 import InputArea, { type InputAreaHandle } from "./InputArea";
 import { t } from "src/i18n";
 import { formatError } from "src/utils/error";
+import { findFileMentionOccurrences } from "src/utils/mentionResolver";
 
 export interface ChatRef {
   addAttachments: (attachments: Attachment[]) => void;
@@ -300,23 +301,48 @@ const Chat = forwardRef<ChatRef, ChatProps>(({ plugin }, ref) => {
       resolved = resolved.replace(/\{content\}/g, noteContent || "(no active note)");
     }
 
-    // Resolve file references (bare file paths from @ mentions).
-    // Walk through actual vault files so that paths containing spaces match
-    // too. Sort by length descending so that longer paths are matched first
-    // (avoids partial matches of shorter ones).
-    const mdFiles = plugin.app.vault.getMarkdownFiles()
-      .slice()
-      .sort((a, b) => b.path.length - a.path.length);
-    for (const file of mdFiles) {
-      if (!resolved.includes(file.path)) continue;
+    // Resolve file references (bare file paths from @ mentions). Walk actual
+    // vault files (longest path first) so paths with spaces/unicode/regex
+    // special chars match. The `requireWhitespaceBoundary` mode enforces that
+    // matched paths stand alone as a token — this fixes a class of false
+    // positives where a bare `.includes(file.path)` check would splice file
+    // content into the middle of unrelated tokens like `seefoo.md` or
+    // `foo.md/child` when only `foo.md` exists in the vault.
+    const mdFiles = plugin.app.vault.getMarkdownFiles();
+    const fileByPath = new Map<string, TFile>(mdFiles.map(f => [f.path, f]));
+    const occurrences = findFileMentionOccurrences(
+      resolved,
+      mdFiles.map(f => f.path),
+      { requireWhitespaceBoundary: true }
+    );
+    if (occurrences.length === 0) return resolved;
+
+    interface Splice { start: number; end: number; replacement: string; }
+    const splices: Splice[] = [];
+    const hitsByPath = new Map<string, typeof occurrences>();
+    for (const occ of occurrences) {
+      const list = hitsByPath.get(occ.key) ?? [];
+      list.push(occ);
+      hitsByPath.set(occ.key, list);
+    }
+    for (const [path, hits] of hitsByPath) {
+      const file = fileByPath.get(path);
+      if (!file) continue;
       try {
         const content = await plugin.app.vault.cachedRead(file);
-        // Only replace the first occurrence to avoid recursive expansion if
-        // the content itself mentions another note path.
-        resolved = resolved.replace(file.path, `From "${file.path}":\n${content}`);
+        const replacement = `From "${path}":\n${content}`;
+        for (const h of hits) {
+          splices.push({ start: h.start, end: h.end, replacement });
+        }
       } catch {
-        // File read failed, leave as-is
+        // File read failed, leave as-is.
       }
+    }
+
+    // Splice in reverse order so earlier offsets stay valid.
+    splices.sort((a, b) => b.start - a.start);
+    for (const s of splices) {
+      resolved = resolved.slice(0, s.start) + s.replacement + resolved.slice(s.end);
     }
 
     return resolved;
