@@ -18,13 +18,13 @@ import {
   WORKSPACE_FOLDER,
 } from "src/types";
 import { localLlmChatStream } from "src/core/localLlmProvider";
-import { getVaultTools, skillWorkflowTool, SKILL_WORKFLOW_TOOL_NAME } from "src/core/tools";
+import { getVaultTools, readNoteTool, skillWorkflowTool, SKILL_WORKFLOW_TOOL_NAME } from "src/core/tools";
 import { EXECUTE_JAVASCRIPT_TOOL } from "src/core/sandboxExecutor";
 import { executeToolCall } from "src/core/toolExecutor";
 import { GET_WORKFLOW_SPEC_TOOL, GET_WORKFLOW_SPEC_TOOL_NAME, handleGetWorkflowSpec } from "src/workflow/workflowSpec";
 import { getRagStore } from "src/core/ragStore";
 import { discoverSkills, loadSkill, buildSkillSystemPrompt, collectSkillWorkflows, type SkillMetadata, type LoadedSkill, type SkillWorkflowRef } from "src/core/skillsLoader";
-import { DEFAULT_BUILTIN_SKILL_IDS, builtinFolderPath, getBuiltinSkillMetadata } from "src/core/builtinSkills";
+import { DEFAULT_BUILTIN_SKILL_IDS, builtinFolderPath, getBuiltinSkillMetadata, isBuiltinSkillPath } from "src/core/builtinSkills";
 import { parseWorkflowFromMarkdown } from "src/workflow/parser";
 import { WorkflowExecutor } from "src/workflow/executor";
 import type { McpServerInfo } from "src/core/mcpManager";
@@ -647,6 +647,20 @@ const Chat = forwardRef<ChatRef, ChatProps>(({ plugin }, ref) => {
       }
       const tools = [...vaultTools, ...mcpTools];
 
+      // Vault skills are loaded lazily — their SKILL.md (workflow IDs,
+      // inputVariables, full instructions) is only reachable via read_note.
+      // If any such skill is active we must keep read_note available even
+      // when vaultToolMode === "none" would otherwise strip it, or the model
+      // gets neither inline workflow metadata nor the tool to fetch it.
+      const hasActiveVaultSkill = loadedSkillsList.some(s => !isBuiltinSkillPath(s.folderPath));
+      if (
+        hasActiveVaultSkill &&
+        !isAnythingLlm &&
+        !tools.some(t => t.function.name === "read_note")
+      ) {
+        tools.push(readNoteTool);
+      }
+
       // Add skill workflow tool if any active skill has workflows
       const skillWorkflowMap = loadedSkillsList.length > 0
         ? collectSkillWorkflows(loadedSkillsList)
@@ -998,7 +1012,8 @@ async function executeSkillWorkflow(
     return JSON.stringify({ error: `Unknown workflow ID: ${workflowId}. Available: ${available}`, workflowId });
   }
 
-  const { vaultPath, workflowRef } = entry;
+  const { vaultPath } = entry;
+  const workflowDisplayName = vaultPath.substring(vaultPath.lastIndexOf("/") + 1).replace(/\.md$/, "") || workflowId;
 
   const file = plugin.app.vault.getAbstractFileByPath(vaultPath);
   if (!(file instanceof TFile)) {
@@ -1009,7 +1024,7 @@ async function executeSkillWorkflow(
 
   let workflow;
   try {
-    workflow = parseWorkflowFromMarkdown(content, workflowRef.name);
+    workflow = parseWorkflowFromMarkdown(content);
   } catch (e) {
     return JSON.stringify({ error: `Failed to parse workflow: ${e instanceof Error ? e.message : String(e)}`, workflowId, workflowPath: vaultPath });
   }
@@ -1032,7 +1047,7 @@ async function executeSkillWorkflow(
   const abortController = new AbortController();
 
   const modal = new WorkflowExecutionModal(
-    plugin.app, workflow, workflowRef.name || workflowId, abortController, () => {},
+    plugin.app, workflow, workflowDisplayName, abortController, () => {},
   );
   modal.open();
 
@@ -1074,7 +1089,7 @@ async function executeSkillWorkflow(
       (log) => executionModalRef?.updateFromLog(log),
       {
         workflowPath: vaultPath,
-        workflowName: workflowRef.name,
+        workflowName: workflowDisplayName,
         recordHistory: true,
         abortSignal: abortController.signal,
       },

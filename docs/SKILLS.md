@@ -117,7 +117,6 @@ name: Data Pipeline
 description: Processes and transforms data
 workflows:
   - path: workflows/extract.md
-    name: Extractor
     description: Extract structured data from text
   - path: workflows/transform.md
     description: Transform data format
@@ -126,9 +125,10 @@ workflows:
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `path` | Yes | Relative path from the skill folder to the workflow file |
-| `name` | No | Workflow name (for files with multiple workflows) |
+| `path` | Yes | Relative path from the skill folder to the workflow file (each file holds exactly one workflow) |
 | `description` | No | Description shown to the AI (defaults to path) |
+
+The `run_skill_workflow` tool ID is derived from `path` (the `.md` extension is stripped and `/` is replaced with `_`), so each capability path uniquely identifies a workflow within the skill.
 
 ### 2. Auto-Discovery
 

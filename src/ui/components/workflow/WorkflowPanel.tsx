@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { TFile, TFolder, Notice, Menu, MarkdownView, stringifyYaml, type App } from "obsidian";
+import { TFile, TFolder, Notice, Menu, stringifyYaml, type App } from "obsidian";
 import { FolderOpen, Keyboard, KeyboardOff, Plus, Sparkles, Zap, ZapOff } from "lucide-react";
 import { EventTriggerModal } from "./EventTriggerModal";
 import { SKILLS_FOLDER, SKILL_FILE_BASENAME, type WorkflowEventTrigger } from "src/types";
@@ -8,7 +8,8 @@ import { WorkflowExecutionModal } from "./WorkflowExecutionModal";
 import type { LocalLlmHubPlugin } from "src/plugin";
 import { SidebarNode, WorkflowNodeType, WorkflowInput, PromptCallbacks } from "src/workflow/types";
 import { loadFromCodeBlock, saveToCodeBlock } from "src/workflow/codeblockSync";
-import { listWorkflowOptions, parseWorkflowFromMarkdown, WorkflowOption } from "src/workflow/parser";
+import { findWorkflowBlocks, parseWorkflowFromMarkdown } from "src/workflow/parser";
+import { planMultiBlockMigration } from "src/workflow/multiBlockMigration";
 import { WorkflowExecutor } from "src/workflow/executor";
 import { NodeEditorModal } from "./NodeEditorModal";
 import { HistoryModal } from "./HistoryModal";
@@ -18,6 +19,7 @@ import { promptForSelection } from "./SelectionPromptModal";
 import { promptForConfirmation } from "./EditConfirmationModal";
 import { promptForDialog } from "./DialogPromptModal";
 import { WorkflowSelectorModal } from "./WorkflowSelectorModal";
+import { ConfirmModal } from "src/ui/components/ConfirmModal";
 import { t } from "src/i18n";
 import { cryptoCache } from "src/core/cryptoCache";
 import { formatError } from "src/utils/error";
@@ -116,7 +118,7 @@ function getDefaultProperties(type: WorkflowNodeType): Record<string, string> {
     case "file-explorer":
       return { mode: "select", title: "", extensions: "", default: "", saveTo: "", savePathTo: "" };
     case "workflow":
-      return { path: "", name: "", input: "", output: "", prefix: "" };
+      return { path: "", input: "", output: "", prefix: "" };
     case "rag-sync":
       return { path: "", oldPath: "", ragSetting: "", saveTo: "" };
     case "file-save":
@@ -230,7 +232,7 @@ function getNodeSummary(node: SidebarNode): string {
     case "file-explorer":
       return node.properties["title"] || "(no title)";
     case "workflow":
-      return `${node.properties["path"]}${node.properties["name"] ? ` (${node.properties["name"]})` : ""}`;
+      return node.properties["path"] || "(no path)";
     case "rag-sync":
       return `${node.properties["path"]} → ${node.properties["ragSetting"]}`;
     case "file-save":
@@ -344,13 +346,17 @@ async function syncSkillInputVariables(
     relPath = "SKILL.md";
   }
   if (!skillFile) return;
+  // Only treat SKILL.md files that live under the skills/ folder as skills.
+  // A stray SKILL.md elsewhere in the vault (e.g. a user's personal note) must
+  // not trigger capability-block rewrites.
+  if (!skillFile.path.startsWith(`${SKILLS_FOLDER}/`)) return;
 
   const content = await app.vault.read(skillFile);
   const { frontmatter, body } = parseFrontmatter(content);
 
   // Capabilities live in the embedded fenced block; fall back to frontmatter
   // for legacy skills, but migrate the result into the block on write.
-  const fromBlock = extractCapabilitiesBlock(body);
+  const fromBlock = extractCapabilitiesBlock(body, skillFile.path);
   const fromFrontmatter = Array.isArray(frontmatter.workflows)
     ? { workflows: frontmatter.workflows }
     : null;
@@ -437,9 +443,11 @@ async function createSkillFromResult(
 
 export default function WorkflowPanel({ plugin }: WorkflowPanelProps) {
   const [workflowFile, setWorkflowFile] = useState<TFile | null>(null);
-  const [workflowName, setWorkflowName] = useState<string | null>(null);
-  const [workflowOptions, setWorkflowOptions] = useState<WorkflowOption[]>([]);
-  const [currentWorkflowIndex, setCurrentWorkflowIndex] = useState<number>(0);
+  // `hasWorkflowBlock` distinguishes "file has no workflow block" (show empty
+  // state with Create buttons) from "file has a block but it's empty/broken"
+  // (show the editor with an error banner).
+  const [hasWorkflowBlock, setHasWorkflowBlock] = useState(false);
+  const [multiBlockCount, setMultiBlockCount] = useState<number>(0);
   const [nodes, setNodes] = useState<SidebarNode[]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -450,7 +458,9 @@ export default function WorkflowPanel({ plugin }: WorkflowPanelProps) {
   const [expandedComments, setExpandedComments] = useState<Set<string>>(new Set());
   const addBtnRef = useRef<HTMLButtonElement>(null);
   const executionModalRef = useRef<WorkflowExecutionModal | null>(null);
-  const pendingWorkflowIndexRef = useRef<number | null>(null);
+
+  // Workflow name is derived from the filename (1 file = 1 workflow).
+  const workflowName = workflowFile ? workflowFile.basename : null;
 
   // Build prompt callbacks for workflow execution
   const buildPromptCallbacks = (): PromptCallbacks => ({
@@ -482,17 +492,18 @@ export default function WorkflowPanel({ plugin }: WorkflowPanelProps) {
     },
   });
 
-  // Run a workflow from a file path and name (used by browse-all modal)
-  const runWorkflowFromPath = async (filePath: string, name: string) => {
+  // Run a workflow from a file path (used by browse-all modal). Each file
+  // holds exactly one workflow under the 1-file-1-workflow rule, so the name
+  // is derived from the filename.
+  const runWorkflowFromPath = async (filePath: string) => {
     const file = plugin.app.vault.getAbstractFileByPath(filePath);
     if (!(file instanceof TFile)) {
       new Notice(`File not found: ${filePath}`);
       return;
     }
-    // Read and parse
+    const name = file.basename;
     const content = await plugin.app.vault.read(file);
-    const workflow = parseWorkflowFromMarkdown(content, name);
-    // Create executor and run with modal
+    const workflow = parseWorkflowFromMarkdown(content);
     const abortController = new AbortController();
     const modal = new WorkflowExecutionModal(plugin.app, workflow, name, abortController, () => {});
     modal.open();
@@ -514,60 +525,40 @@ export default function WorkflowPanel({ plugin }: WorkflowPanelProps) {
 
   // Load workflow from active file
   const loadWorkflow = useCallback(async () => {
-    // Consume pending index early so it doesn't leak across unrelated loadWorkflow calls
-    const pendingIndex = pendingWorkflowIndexRef.current;
-    pendingWorkflowIndexRef.current = null;
-
     const activeFile = plugin.app.workspace.getActiveFile();
     if (!activeFile || activeFile.extension !== "md") {
       setWorkflowFile(null);
+      setHasWorkflowBlock(false);
+      setMultiBlockCount(0);
       setNodes([]);
-      setWorkflowOptions([]);
-      setLoadError(null);
-      return;
-    }
-
-    const content = await plugin.app.vault.read(activeFile);
-    const options = listWorkflowOptions(content);
-
-    if (options.length === 0) {
-      setWorkflowFile(activeFile);
-      setNodes([]);
-      setWorkflowOptions([]);
       setLoadError(null);
       return;
     }
 
     setWorkflowFile(activeFile);
-    setWorkflowOptions(options);
 
-    const indexToLoad = pendingIndex !== null && pendingIndex < options.length
-      ? pendingIndex
-      : currentWorkflowIndex < options.length ? currentWorkflowIndex : 0;
-    const selectedOption = options[indexToLoad];
+    const content = await plugin.app.vault.read(activeFile);
+    const blockCount = findWorkflowBlocks(content).length;
+    setMultiBlockCount(blockCount);
+    const result = loadFromCodeBlock(content);
 
-    // Check for YAML parse error first
-    if (selectedOption?.parseError) {
-      setLoadError(selectedOption.parseError);
+    if (!result.data && !result.error) {
+      // No workflow block at all
+      setHasWorkflowBlock(false);
       setNodes([]);
-      setWorkflowName(selectedOption.name || null);
-      setCurrentWorkflowIndex(indexToLoad);
+      setLoadError(null);
       return;
     }
 
-    const result = loadFromCodeBlock(content, undefined, indexToLoad);
+    setHasWorkflowBlock(true);
     if (result.error) {
       setLoadError(result.error);
       setNodes([]);
-      setWorkflowName(null);
-      setCurrentWorkflowIndex(indexToLoad);
     } else if (result.data) {
       setLoadError(null);
       setNodes(result.data.nodes);
-      setWorkflowName(result.data.name || null);
-      setCurrentWorkflowIndex(indexToLoad);
     }
-  }, [plugin.app, currentWorkflowIndex]);
+  }, [plugin.app]);
 
   // Watch active file changes
   useEffect(() => {
@@ -591,109 +582,89 @@ export default function WorkflowPanel({ plugin }: WorkflowPanelProps) {
     await saveToCodeBlock(plugin.app, workflowFile, {
       name: workflowName || "default",
       nodes: newNodes,
-    }, currentWorkflowIndex);
+    });
 
     await syncSkillInputVariables(plugin.app, workflowFile, newNodes);
-  }, [plugin.app, workflowFile, workflowName, currentWorkflowIndex]);
+  }, [plugin.app, workflowFile, workflowName]);
+
+  // Split a multi-block workflow file into individual "1 file = 1 workflow"
+  // files. The original file keeps the first block plus any surrounding prose;
+  // blocks 2..N are written to sibling files whose basename is derived from
+  // each block's YAML `name:` (falling back to an indexed slug).
+  const migrateMultiBlockFile = async () => {
+    if (!workflowFile) return;
+
+    const content = await plugin.app.vault.read(workflowFile);
+    const parent = workflowFile.parent;
+    const folderPath = parent ? parent.path : "";
+    const existingPaths = new Set(
+      plugin.app.vault.getMarkdownFiles().map(f => f.path)
+    );
+
+    const plan = planMultiBlockMigration(content, folderPath, existingPaths);
+    if (!plan) {
+      new Notice(t("workflow.migrateNothingToDo"));
+      return;
+    }
+
+    const confirmed = await new ConfirmModal(
+      plugin.app,
+      t("workflow.migrateConfirm", {
+        count: String(plan.entries.length),
+        files: plan.entries.map(e => e.path).join("\n"),
+      }),
+      t("workflow.migrate"),
+    ).openAndWait();
+    if (!confirmed) return;
+
+    // Create the split files first. If any write fails, surface the error and
+    // DO NOT touch the original file — partial state is easier to recover from
+    // when the source of truth is still intact.
+    for (const entry of plan.entries) {
+      await plugin.app.vault.create(entry.path, `${entry.raw}\n`);
+    }
+    await plugin.app.vault.modify(workflowFile, plan.stripped);
+
+    new Notice(t("workflow.migrateSuccess", { count: String(plan.entries.length) }));
+    await loadWorkflow();
+  };
 
   // Open browse all workflows modal
   const openBrowseAllModal = () => {
     new WorkflowSelectorModal(
       plugin.app,
       plugin,
-      (filePath, workflowName) => {
-        void runWorkflowFromPath(filePath, workflowName);
-      },
-      (filePath, _workflowName, workflowIndex) => {
-        // Set the pending index so loadWorkflow picks it up when active-leaf-change fires
-        pendingWorkflowIndexRef.current = workflowIndex;
-        // If the same file is already active, active-leaf-change won't fire after openFile,
-        // so we need to trigger loadWorkflow manually.
-        // Note: this callback runs BEFORE openFile(), so getActiveFile() still returns the old file.
-        const activeFile = plugin.app.workspace.getActiveFile();
-        if (activeFile && activeFile.path === filePath) {
-          // Same file — active-leaf-change won't fire, call directly
-          void loadWorkflow();
-        }
-        // Different file — active-leaf-change will fire and consume pendingWorkflowIndexRef
+      (filePath) => {
+        void runWorkflowFromPath(filePath);
       }
     ).open();
   };
 
-  // Handle workflow selection change
-  const handleWorkflowSelect = async (e: React.ChangeEvent<HTMLSelectElement>) => {
+  // Handle toolbar action dropdown (open/create/reload shortcuts). Replaces the
+  // former per-workflow selector since 1 file = 1 workflow removes the need to
+  // pick which block within a file.
+  const handleActionSelect = async (e: React.ChangeEvent<HTMLSelectElement>) => {
     const value = e.target.value;
+    e.target.value = "__self__";
 
-    // Handle reload from file
     if (value === "__reload__") {
-      e.target.value = String(currentWorkflowIndex);
       await loadWorkflow();
       new Notice(t("workflow.reloaded"));
       return;
     }
 
-    // Handle browse all workflows
     if (value === "__browse_all__") {
-      e.target.value = String(currentWorkflowIndex);
       openBrowseAllModal();
       return;
     }
 
-    // Handle AI workflow creation
     if (value === "__new_ai__") {
-      e.target.value = String(currentWorkflowIndex);
-      const defaultOutputPath = workflowFile?.path?.replace(/\.md$/, "");
-      const result = await promptForAIWorkflow(plugin.app, plugin, "create", undefined, undefined, defaultOutputPath);
+      // Under 1-file-1-workflow the currently open file is already taken, so
+      // defaulting the output to its path would just trigger the collision
+      // check. Fall through to the modal's default template (workflows/{{name}}).
+      const result = await promptForAIWorkflow(plugin.app, plugin, "create");
       if (result && result.outputPath) {
         await saveWorkflowResultToFile(result);
-      }
-      return;
-    }
-
-    const index = Number(value);
-    if (Number.isNaN(index) || !workflowFile) return;
-
-    setCurrentWorkflowIndex(index);
-
-    // Check for YAML parse error first
-    const selectedOpt = workflowOptions[index];
-    if (selectedOpt?.parseError) {
-      setLoadError(selectedOpt.parseError);
-      setNodes([]);
-      setWorkflowName(selectedOpt.name || null);
-    } else {
-      const content = await plugin.app.vault.read(workflowFile);
-      const result = loadFromCodeBlock(content, undefined, index);
-      if (result.error) {
-        setLoadError(result.error);
-        setNodes([]);
-        setWorkflowName(null);
-      } else if (result.data) {
-        setLoadError(null);
-        setNodes(result.data.nodes);
-        setWorkflowName(result.data.name || null);
-      }
-    }
-
-    // Move cursor to the selected workflow's position
-    const selectedOption = workflowOptions[index];
-    if (selectedOption && workflowFile) {
-      // Find the leaf that has this file open
-      const leaves = plugin.app.workspace.getLeavesOfType("markdown");
-      for (const leaf of leaves) {
-        const view = leaf.view;
-        if (view instanceof MarkdownView && view.file?.path === workflowFile.path) {
-          const editor = view.editor;
-          if (editor) {
-            // Move to the start of the workflow block (line after ```llm-workflow)
-            editor.setCursor({ line: selectedOption.startLine + 1, ch: 0 });
-            // Scroll to make it visible
-            editor.scrollIntoView({ from: { line: selectedOption.startLine, ch: 0 }, to: { line: selectedOption.startLine + 5, ch: 0 } }, true);
-            // Focus the editor
-            editor.focus();
-          }
-          break;
-        }
       }
     }
   };
@@ -766,7 +737,6 @@ export default function WorkflowPanel({ plugin }: WorkflowPanelProps) {
 
     if (result) {
       setNodes(result.nodes);
-      setWorkflowName(result.name);
 
       // Add modification history entry
       if (result.description) {
@@ -797,12 +767,10 @@ export default function WorkflowPanel({ plugin }: WorkflowPanelProps) {
         await plugin.app.vault.modify(workflowFile, newContent);
       }
 
-      // Use result.name directly instead of saveWorkflow() because
-      // setWorkflowName() is async and workflowName state may not be updated yet
       await saveToCodeBlock(plugin.app, workflowFile, {
         name: result.name,
         nodes: result.nodes,
-      }, currentWorkflowIndex);
+      });
       new Notice(t("workflow.modifiedSuccessfully"));
     }
   };
@@ -822,7 +790,7 @@ export default function WorkflowPanel({ plugin }: WorkflowPanelProps) {
     // Capabilities (workflow list) live in the embedded `skill-capabilities`
     // fenced block; fall back to frontmatter for legacy skills (the write
     // path re-emits them into the block).
-    const capabilitiesBlock = extractCapabilitiesBlock(instructions);
+    const capabilitiesBlock = extractCapabilitiesBlock(instructions, workflowFile.path);
     const folder = workflowFile.parent;
     const declaredWorkflows: Array<Record<string, unknown>> = Array.isArray(capabilitiesBlock?.workflows)
       ? (capabilitiesBlock.workflows as Array<Record<string, unknown>>)
@@ -832,9 +800,6 @@ export default function WorkflowPanel({ plugin }: WorkflowPanelProps) {
     const declaredFirst = declaredWorkflows[0];
     const declaredFirstPath = declaredFirst && typeof declaredFirst.path === "string"
       ? declaredFirst.path
-      : null;
-    const declaredFirstName = declaredFirst && typeof declaredFirst.name === "string"
-      ? declaredFirst.name
       : null;
 
     let workflowTargetFile: TFile | null = null;
@@ -854,26 +819,18 @@ export default function WorkflowPanel({ plugin }: WorkflowPanelProps) {
       }
     }
 
-    const resolveBlockIndex = (content: string, name: string | null): number => {
-      if (!name) return 0;
-      const opts = listWorkflowOptions(content);
-      const idx = opts.findIndex(o => o.name === name);
-      return idx >= 0 ? idx : 0;
-    };
-
+    // Read current YAML from the target file (each file holds exactly one
+    // workflow), falling back to an inline workflow block in SKILL.md.
     let currentYaml = "";
-    let blockIndex = 0;
     if (workflowTargetFile) {
       const wfContent = await plugin.app.vault.read(workflowTargetFile);
-      blockIndex = resolveBlockIndex(wfContent, declaredFirstName);
-      const loaded = loadFromCodeBlock(wfContent, undefined, blockIndex);
+      const loaded = loadFromCodeBlock(wfContent);
       if (loaded.data) {
         currentYaml = buildWorkflowYaml(loaded.data.nodes, loaded.data.name ?? null);
       }
     }
     if (!currentYaml) {
-      blockIndex = resolveBlockIndex(skillContent, declaredFirstName);
-      const loaded = loadFromCodeBlock(skillContent, undefined, blockIndex);
+      const loaded = loadFromCodeBlock(skillContent);
       if (loaded.data) {
         currentYaml = buildWorkflowYaml(loaded.data.nodes, loaded.data.name ?? null);
       }
@@ -949,16 +906,18 @@ export default function WorkflowPanel({ plugin }: WorkflowPanelProps) {
     const updatedBody = upsertCapabilitiesBlock(newInstructions, updatedCapabilities);
     await plugin.app.vault.modify(workflowFile, writeSkillMd(updatedFrontmatter, updatedBody));
 
+    // Write workflow YAML to the target file (1 file = 1 workflow).
     if (workflowTargetFile) {
       await saveToCodeBlock(plugin.app, workflowTargetFile, {
         name: result.name,
         nodes: result.nodes,
-      }, blockIndex);
+      });
     } else {
+      // No existing workflow file — write inline into SKILL.md.
       await saveToCodeBlock(plugin.app, workflowFile, {
         name: result.name,
         nodes: result.nodes,
-      }, blockIndex);
+      });
     }
 
     new Notice(t("workflow.modifiedSuccessfully"));
@@ -1065,7 +1024,7 @@ export default function WorkflowPanel({ plugin }: WorkflowPanelProps) {
 
     try {
       const content = await plugin.app.vault.read(workflowFile);
-      const workflow = parseWorkflowFromMarkdown(content, workflowName || undefined, currentWorkflowIndex);
+      const workflow = parseWorkflowFromMarkdown(content);
 
       const executor = new WorkflowExecutor(plugin.app, plugin);
 
@@ -1152,16 +1111,7 @@ export default function WorkflowPanel({ plugin }: WorkflowPanelProps) {
       }
 
       const content = await plugin.app.vault.read(file);
-
-      // Find the correct workflow index by name
-      const options = listWorkflowOptions(content);
-      let retryWorkflowIndex = 0;
-      if (retryWorkflowName) {
-        const idx = options.findIndex(opt => opt.name === retryWorkflowName);
-        if (idx >= 0) retryWorkflowIndex = idx;
-      }
-
-      const workflow = parseWorkflowFromMarkdown(content, retryWorkflowName || undefined, retryWorkflowIndex);
+      const workflow = parseWorkflowFromMarkdown(content);
 
       const executor = new WorkflowExecutor(plugin.app, plugin);
 
@@ -1273,8 +1223,11 @@ export default function WorkflowPanel({ plugin }: WorkflowPanelProps) {
       const workflowContent = `> [!info] AI Workflow History\n${historyLine}\n\n${workflowBody}`;
 
       const existingFile = plugin.app.vault.getAbstractFileByPath(filePath);
-      if (existingFile && existingFile instanceof TFile) {
+      if (existingFile instanceof TFile) {
         const existingContent = await plugin.app.vault.read(existingFile);
+        if (findWorkflowBlocks(existingContent).length > 0) {
+          throw new Error(t("workflow.generation.outputPathTaken", { path: filePath }));
+        }
         const separator = existingContent.endsWith("\n") ? "\n" : "\n\n";
         await plugin.app.vault.modify(existingFile, existingContent + separator + workflowContent);
         targetFile = existingFile;
@@ -1359,7 +1312,7 @@ export default function WorkflowPanel({ plugin }: WorkflowPanelProps) {
   }
 
   // No workflow code block in file
-  if (workflowOptions.length === 0) {
+  if (!hasWorkflowBlock) {
     return (
       <div className="llm-hub-workflow-sidebar">
         <div className="llm-hub-workflow-sidebar-content">
@@ -1408,20 +1361,10 @@ export default function WorkflowPanel({ plugin }: WorkflowPanelProps) {
       <div className="llm-hub-workflow-sidebar-header">
         <select
           className="llm-hub-workflow-sidebar-select"
-          value={currentWorkflowIndex}
-          onChange={(e) => void handleWorkflowSelect(e)}
+          value="__self__"
+          onChange={(e) => void handleActionSelect(e)}
         >
-          {workflowOptions.length === 0 ? (
-            <option value="" disabled>
-              {t("workflow.noWorkflows")}
-            </option>
-          ) : (
-            workflowOptions.map((option, index) => (
-              <option key={index} value={index}>
-                {option.label}
-              </option>
-            ))
-          )}
+          <option value="__self__">{workflowName || workflowFile.basename}</option>
           <option value="__browse_all__">{t("workflow.browseAllWorkflows")}</option>
           <option value="__new_ai__">{t("workflow.newAI")}</option>
           <option value="__reload__">{t("workflow.reloadFromFile")}</option>
@@ -1467,6 +1410,14 @@ export default function WorkflowPanel({ plugin }: WorkflowPanelProps) {
         <div className="llm-hub-workflow-error-banner">
           <span className="llm-hub-workflow-error-icon">⚠</span>
           <span className="llm-hub-workflow-error-message">{loadError}</span>
+          {multiBlockCount > 1 && (
+            <button
+              className="llm-hub-workflow-error-migrate-btn"
+              onClick={() => void migrateMultiBlockFile()}
+            >
+              {t("workflow.migrate")}
+            </button>
+          )}
         </div>
       )}
 
@@ -1636,8 +1587,9 @@ export default function WorkflowPanel({ plugin }: WorkflowPanelProps) {
           {t("workflow.history")}
         </button>
         {(() => {
-          const workflowId = workflowName ? `${workflowFile.path}#${workflowName}` : "";
-          const isHotkeyEnabled = workflowName && enabledHotkeys.includes(workflowId);
+          const workflowId = workflowFile.path;
+          const displayName = workflowName || workflowFile.basename;
+          const isHotkeyEnabled = enabledHotkeys.includes(workflowId);
           const currentEventTrigger = eventTriggers.find(t => t.workflowId === workflowId);
           const hasEventTrigger = !!currentEventTrigger;
           return (
@@ -1645,38 +1597,29 @@ export default function WorkflowPanel({ plugin }: WorkflowPanelProps) {
               <button
                 className={`llm-hub-workflow-sidebar-hotkey-btn ${isHotkeyEnabled ? "llm-hub-hotkey-enabled" : ""}`}
                 onClick={() => {
-                  if (!workflowName) {
-                    new Notice(t("workflow.mustHaveNameForHotkey"));
-                    return;
-                  }
                   let newEnabledHotkeys: string[];
                   if (isHotkeyEnabled) {
                     newEnabledHotkeys = enabledHotkeys.filter(id => id !== workflowId);
                     new Notice(t("workflow.hotkeyDisabled"));
                   } else {
                     newEnabledHotkeys = [...enabledHotkeys, workflowId];
-                    new Notice(t("workflow.hotkeyEnabled", { name: workflowName }));
+                    new Notice(t("workflow.hotkeyEnabled", { name: displayName }));
                   }
                   setEnabledHotkeys(newEnabledHotkeys);
                   plugin.settings.enabledWorkflowHotkeys = newEnabledHotkeys;
                   void plugin.saveSettings();
                 }}
                 title={isHotkeyEnabled ? t("workflow.hotkeyEnabledClick") : t("workflow.enableHotkey")}
-                disabled={!workflowName}
               >
                 {isHotkeyEnabled ? <Keyboard size={16} /> : <KeyboardOff size={16} />}
               </button>
               <button
                 className={`llm-hub-workflow-sidebar-event-btn ${hasEventTrigger ? "llm-hub-event-enabled" : ""}`}
                 onClick={() => {
-                  if (!workflowName) {
-                    new Notice(t("workflow.mustHaveNameForEvent"));
-                    return;
-                  }
                   const modal = new EventTriggerModal(
                     plugin.app,
                     workflowId,
-                    workflowName,
+                    displayName,
                     currentEventTrigger || null,
                     (trigger) => {
                       let newTriggers: WorkflowEventTrigger[];
@@ -1693,7 +1636,7 @@ export default function WorkflowPanel({ plugin }: WorkflowPanelProps) {
                         } else {
                           newTriggers = [...eventTriggers, trigger];
                         }
-                        new Notice(t("workflow.eventTriggersEnabled", { name: workflowName }));
+                        new Notice(t("workflow.eventTriggersEnabled", { name: displayName }));
                       }
                       setEventTriggers(newTriggers);
                       plugin.settings.enabledWorkflowEventTriggers = newTriggers;
@@ -1703,7 +1646,6 @@ export default function WorkflowPanel({ plugin }: WorkflowPanelProps) {
                   modal.open();
                 }}
                 title={hasEventTrigger ? t("workflow.eventTriggersActive", { events: currentEventTrigger?.events.join(", ") || "" }) : t("workflow.configureEventTriggers")}
-                disabled={!workflowName}
               >
                 {hasEventTrigger ? <Zap size={16} /> : <ZapOff size={16} />}
               </button>

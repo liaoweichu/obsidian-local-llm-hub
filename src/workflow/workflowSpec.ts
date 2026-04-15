@@ -240,8 +240,7 @@ Prompt user to select text from a file.
 
 #### workflow
 Execute sub-workflow.
-- **path** (required): Workflow file path
-- **name** (optional): Workflow name (if file has multiple)
+- **path** (required): Workflow file path (each file holds exactly one workflow)
 - **input** (optional): JSON mapping, e.g., '{"subVar": "{{parentVar}}"}'
 - **output** (optional): JSON mapping, e.g., '{"parentVar": "subVar"}'
 - **prefix** (optional): Prefix for all imported variables
@@ -557,8 +556,12 @@ export function buildWorkflowSpecContext(plugin: LocalLlmHubPlugin): WorkflowSpe
 }
 
 /**
- * Handler for `get_workflow_spec` tool calls. Accepts `nodeTypes` as either
- * an array (some model runtimes coerce it) or a JSON-encoded array string.
+ * Handler for `get_workflow_spec` tool calls. Accepts `nodeTypes` as:
+ * - an array (normal case),
+ * - a JSON-encoded array string ("[\"command\", \"http\"]"),
+ * - a plain single name ("command") or comma/space-separated names
+ *   ("command, http") — some LLMs emit these despite the schema.
+ * Empty/undefined falls through and returns the full spec.
  */
 export function handleGetWorkflowSpec(
   args: Record<string, unknown>,
@@ -568,14 +571,22 @@ export function handleGetWorkflowSpec(
   let nodeTypes: string[] | undefined;
   if (Array.isArray(raw)) {
     nodeTypes = raw.filter((v): v is string => typeof v === "string");
-  } else if (typeof raw === "string" && raw.trim().startsWith("[")) {
-    try {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        nodeTypes = parsed.filter((v): v is string => typeof v === "string");
+  } else if (typeof raw === "string") {
+    const trimmed = raw.trim();
+    if (trimmed.length > 0) {
+      if (trimmed.startsWith("[")) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (Array.isArray(parsed)) {
+            nodeTypes = parsed.filter((v): v is string => typeof v === "string");
+          }
+        } catch {
+          // fall through to bare-name handling below
+        }
       }
-    } catch {
-      // fall through — full spec
+      if (!nodeTypes) {
+        nodeTypes = trimmed.split(/[,\s]+/).filter(s => s.length > 0);
+      }
     }
   }
   return getWorkflowNodeSpec(nodeTypes, buildWorkflowSpecContext(plugin));

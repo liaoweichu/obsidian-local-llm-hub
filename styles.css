@@ -1275,6 +1275,22 @@ body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) 
 
 .llm-hub-workflow-error-message {
   word-break: break-word;
+  flex: 1;
+}
+
+.llm-hub-workflow-error-migrate-btn {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border: none;
+}
+
+.llm-hub-workflow-error-migrate-btn:hover {
+  background: var(--interactive-accent-hover);
 }
 
 .llm-hub-workflow-sidebar-content {

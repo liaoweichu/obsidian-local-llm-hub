@@ -406,7 +406,6 @@ Execute another workflow as a sub-workflow.
 - id: runSub
   type: workflow
   path: "workflows/summarize.md"
-  name: "Summarizer"
   input: '{"text": "{{content}}"}'
   output: '{"result": "summary"}'
   prefix: "sub_"
@@ -414,8 +413,7 @@ Execute another workflow as a sub-workflow.
 
 | Property | Description |
 |----------|-------------|
-| `path` | Path to workflow file (required) |
-| `name` | Workflow name (for files with multiple workflows) |
+| `path` | Path to workflow file (required, each file holds exactly one workflow) |
 | `input` | JSON mapping sub-workflow variables to values |
 | `output` | JSON mapping parent variables to sub-workflow results |
 | `prefix` | Prefix for all output variables (when `output` not specified) |
@@ -1213,13 +1211,11 @@ nodes:
   - id: toJapanese
     type: workflow
     path: "workflows/translate.md"
-    name: "Translator"
     input: '{"text": "{{userInput.input}}", "targetLang": "Japanese"}'
     output: '{"japaneseText": "translated"}'
   - id: toSpanish
     type: workflow
     path: "workflows/translate.md"
-    name: "Translator"
     input: '{"text": "{{userInput.input}}", "targetLang": "Spanish"}'
     output: '{"spanishText": "translated"}'
   - id: save

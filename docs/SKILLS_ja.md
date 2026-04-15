@@ -117,7 +117,6 @@ name: Data Pipeline
 description: Processes and transforms data
 workflows:
   - path: workflows/extract.md
-    name: Extractor
     description: Extract structured data from text
   - path: workflows/transform.md
     description: Transform data format
@@ -126,9 +125,10 @@ workflows:
 
 | フィールド | 必須 | 説明 |
 |------------|------|------|
-| `path` | はい | スキルフォルダからワークフローファイルへの相対パス |
-| `name` | いいえ | ワークフロー名（複数ワークフローを含むファイル用） |
+| `path` | はい | スキルフォルダからワークフローファイルへの相対パス（各ファイルにはワークフロー1つだけ） |
 | `description` | いいえ | AI に表示される説明（デフォルト: パス） |
+
+`run_skill_workflow` のツール ID は `path` から導出されます（`.md` 拡張子は除去され、`/` は `_` に置換）。capability の path だけでスキル内のワークフローを一意に識別できます。
 
 ### 2. 自動検出
 

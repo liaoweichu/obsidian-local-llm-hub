@@ -203,7 +203,7 @@ export type ObsidianEventType = "create" | "modify" | "delete" | "rename" | "fil
 
 // Workflow event trigger
 export interface WorkflowEventTrigger {
-  workflowId: string; // "path#name" format
+  workflowId: string; // Vault path to the workflow file (e.g., "folder/file.md"). Each file holds exactly one workflow.
   events: ObsidianEventType[];
   filePattern?: string;
 }

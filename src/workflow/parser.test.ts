@@ -426,3 +426,31 @@ nodes:
     expect(block).not.toContain("```workflow\n");
   });
 });
+
+describe("parseWorkflowFromMarkdown (1 file = 1 workflow)", () => {
+  const multiBlock = `
+\`\`\`llm-workflow
+name: first
+nodes:
+  - id: a
+    type: command
+    prompt: one
+\`\`\`
+
+\`\`\`llm-workflow
+name: second
+nodes:
+  - id: b
+    type: command
+    prompt: two
+\`\`\`
+`;
+
+  it("throws when the file contains multiple workflow blocks", () => {
+    expect(() => parseWorkflowFromMarkdown(multiBlock)).toThrow(/Multiple workflow blocks/);
+  });
+
+  it("throws when the file contains no workflow block", () => {
+    expect(() => parseWorkflowFromMarkdown("just prose, no code block")).toThrow(/No workflow code block/);
+  });
+});

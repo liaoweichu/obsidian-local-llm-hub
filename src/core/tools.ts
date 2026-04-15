@@ -1,7 +1,7 @@
 import type { ToolDefinition, VaultToolMode } from "../types";
 
 // All vault tool definitions
-const readNote: ToolDefinition = {
+export const readNoteTool: ToolDefinition = {
   type: "function",
   function: {
     name: "read_note",
@@ -186,7 +186,7 @@ const searchToolNames = new Set(["search_notes", "list_notes"]);
 
 // All vault tools
 const allVaultTools: ToolDefinition[] = [
-  readNote, createNote, updateNote, renameNote, createFolder,
+  readNoteTool, createNote, updateNote, renameNote, createFolder,
   searchNotes, listNotes, listFolders, getActiveNote, proposeEdit,
 ];
 
