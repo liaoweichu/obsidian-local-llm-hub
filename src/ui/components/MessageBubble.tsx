@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { type App, MarkdownRenderer, Component } from "obsidian";
+import { type App, MarkdownRenderer, Component, Notice } from "obsidian";
 import { Copy, Check } from "lucide-react";
 import type { Message, ToolCall, ToolResult } from "src/types";
 import { discoverSkills } from "src/core/skillsLoader";
@@ -33,6 +33,16 @@ export default function MessageBubble({
     }
     return map;
   }, [message.toolCalls, message.toolResults]);
+
+  const noteTargets = useMemo(() => {
+    if (!message.toolCalls) return new Map<string, string>();
+    const map = new Map<string, string>();
+    for (const tc of message.toolCalls) {
+      const target = getToolNoteTarget(app, tc, message.toolResults);
+      if (target) map.set(tc.id, target);
+    }
+    return map;
+  }, [message.toolCalls, message.toolResults, app]);
 
 
   useEffect(() => {
@@ -183,9 +193,28 @@ export default function MessageBubble({
             </span>
             {message.toolCalls.map((toolCall, index) => {
               const failedWorkflowPath = failedWorkflowPaths.get(toolCall.id);
+              const noteTarget = noteTargets.get(toolCall.id);
               return (
                 <span key={index} className="llm-hub-tool-indicator-group">
-                  <span className="llm-hub-tool-name">{toolCall.name}</span>
+                  <span
+                    className={`llm-hub-tool-name${noteTarget ? " llm-hub-tool-clickable" : ""}`}
+                    onClick={() => {
+                      if (noteTarget) {
+                        void app.workspace.openLinkText(noteTarget, "", false).catch(() => {
+                          new Notice(getToolDetail(toolCall), 3000);
+                        });
+                      } else {
+                        new Notice(getToolDetail(toolCall), 3000);
+                      }
+                    }}
+                    title={
+                      noteTarget
+                        ? t("message.clickToOpen", { source: noteTarget })
+                        : t("message.clickToSeeDetails")
+                    }
+                  >
+                    {toolCall.name}
+                  </span>
                   {failedWorkflowPath && (
                     <button
                       className="llm-hub-tool-open-workflow-btn"
@@ -304,6 +333,88 @@ function getFailedWorkflowPath(toolCall: ToolCall, toolResults?: ToolResult[]): 
   const r = result as Record<string, unknown>;
   if (typeof r.error !== "string") return null;
   return typeof r.workflowPath === "string" ? r.workflowPath : null;
+}
+
+// Extract the note path/name referenced by a tool call so that clicking
+// the tool tag can open that note. Returns null for tools that don't
+// target a single identifiable note (search, list, bulk operations, etc.).
+function getToolNoteTarget(
+  app: App,
+  toolCall: ToolCall,
+  toolResults?: ToolResult[]
+): string | null {
+  // MCP tools don't reference vault notes
+  if (toolCall.name.startsWith("mcp_")) return null;
+
+  // Prefer the concrete path returned by the tool result when available,
+  // since the LLM may have passed a name without folder and the executor
+  // resolves it to the actual vault path.
+  const result = toolResults?.find((r) => r.toolCallId === toolCall.id)?.result;
+  if (result && typeof result === "object") {
+    const r = result as Record<string, unknown>;
+    if (r.success !== false) {
+      if (typeof r.path === "string" && r.path) return r.path;
+      if (typeof r.newPath === "string" && r.newPath) return r.newPath;
+    }
+  }
+
+  const args = toolCall.arguments;
+  switch (toolCall.name) {
+    case "read_note":
+    case "create_note":
+    case "update_note":
+    case "propose_edit": {
+      if (typeof args.path === "string" && args.path) return args.path;
+      return null;
+    }
+    case "rename_note": {
+      if (typeof args.newPath === "string" && args.newPath) return args.newPath;
+      if (typeof args.oldPath === "string" && args.oldPath) return args.oldPath;
+      return null;
+    }
+    case "get_active_note": {
+      const active = app.workspace.getActiveFile();
+      return active ? active.path : null;
+    }
+    default:
+      return null;
+  }
+}
+
+function getToolDetail(toolCall: ToolCall): string {
+  const args = toolCall.arguments;
+  const parts: string[] = [toolCall.name];
+
+  // Handle MCP tools - show all arguments
+  if (toolCall.name.startsWith("mcp_")) {
+    const argEntries = Object.entries(args);
+    if (argEntries.length > 0) {
+      const argStrings = argEntries.map(([key, value]) => {
+        if (typeof value === "string") {
+          const displayValue = value.length > 50 ? value.slice(0, 50) + "..." : value;
+          return `${key}: "${displayValue}"`;
+        } else if (typeof value === "object" && value !== null) {
+          return `${key}: ${JSON.stringify(value).slice(0, 50)}...`;
+        }
+        return `${key}: ${String(value)}`;
+      });
+      parts.push(argStrings.join(", "));
+    }
+    return parts.join("\n");
+  }
+
+  // Handle built-in tools
+  if (typeof args.oldPath === "string" && typeof args.newPath === "string") {
+    parts.push(args.oldPath + " → " + args.newPath);
+  } else if (typeof args.path === "string") {
+    parts.push(args.path);
+  } else if (typeof args.query === "string") {
+    parts.push(`"${args.query}"`);
+  } else if (typeof args.folder === "string") {
+    parts.push(args.folder);
+  }
+
+  return parts.join(": ");
 }
 
 function formatTime(timestamp: number): string {

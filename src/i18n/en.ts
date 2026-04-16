@@ -150,6 +150,7 @@ export const en = {
   "message.openWorkflow": "Open workflow",
   "message.workflowErrorHint": "Tip: open the workflow, modify it with AI, reference the execution history to pick the failing step, and ask the AI to fix it.",
   "message.clickToOpen": "Click to open: {{source}}",
+  "message.clickToSeeDetails": "Click to see details",
 
   // Tabs
   "tab.chat": "Chat",

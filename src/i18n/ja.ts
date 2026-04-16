@@ -150,6 +150,7 @@ export const ja: Record<string, string> = {
   "message.openWorkflow": "ワークフローを開く",
   "message.workflowErrorHint": "ヒント：ワークフローを開き、AIで修正、実行履歴を参照して失敗したステップを選び、AIに修正を依頼してください。",
   "message.clickToOpen": "クリックして開く: {{source}}",
+  "message.clickToSeeDetails": "クリックして詳細を表示",
 
   // Tabs
   "tab.chat": "チャット",
