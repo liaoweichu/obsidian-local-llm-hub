@@ -3,6 +3,7 @@ import type { ToolCall } from "../types";
 import type { McpManager } from "./mcpManager";
 import { getEditHistoryManager } from "./editHistory";
 import { executeSandboxedJS } from "./sandboxExecutor";
+import { ensureMarkdownExtensionIfMissing, getVaultTextFiles } from "./vaultFileTypes";
 
 export interface ToolExecutionResult {
   success: boolean;
@@ -42,7 +43,7 @@ export async function executeToolCall(
       }
 
       case "create_note": {
-        const path = args.path as string;
+        const path = ensureMarkdownExtensionIfMissing(args.path as string);
         const content = args.content as string;
         const existing = app.vault.getAbstractFileByPath(path);
         if (existing) {
@@ -60,7 +61,7 @@ export async function executeToolCall(
       case "search_notes": {
         const query = (args.query as string).toLowerCase();
         const limit = parseInt(args.limit as string || "10", 10);
-        const files = app.vault.getMarkdownFiles();
+        const files = getVaultTextFiles(app);
         const results: { path: string; snippet: string }[] = [];
 
         for (const file of files) {
@@ -82,7 +83,7 @@ export async function executeToolCall(
         }
 
         if (results.length === 0) {
-          return { success: true, result: "No notes found matching the query." };
+          return { success: true, result: "No text-based vault files found matching the query." };
         }
         return {
           success: true,
@@ -93,7 +94,7 @@ export async function executeToolCall(
       case "list_notes": {
         const folder = (args.folder as string) || "";
         const recursive = (args.recursive as string) === "true";
-        const files = app.vault.getMarkdownFiles()
+        const files = getVaultTextFiles(app)
           .filter(f => {
             if (!folder) return recursive || !f.path.includes("/");
             if (recursive) return f.path.startsWith(folder + "/");
@@ -103,7 +104,7 @@ export async function executeToolCall(
           .map(f => f.path)
           .sort();
 
-        return { success: true, result: files.length > 0 ? files.join("\n") : "No notes found." };
+        return { success: true, result: files.length > 0 ? files.join("\n") : "No text-based vault files found." };
       }
 
       case "list_folders": {
@@ -126,7 +127,7 @@ export async function executeToolCall(
       case "get_active_note": {
         const activeFile = app.workspace.getActiveFile();
         if (!activeFile) {
-          return { success: true, result: "No note is currently open." };
+          return { success: true, result: "No vault file is currently open." };
         }
         const content = await app.vault.cachedRead(activeFile);
         return {
@@ -163,13 +164,10 @@ export async function executeToolCall(
 
       case "rename_note": {
         const oldPath = args.oldPath as string;
-        let newPath = args.newPath as string;
+        const newPath = ensureMarkdownExtensionIfMissing(args.newPath as string);
         const file = app.vault.getAbstractFileByPath(oldPath);
         if (!(file instanceof TFile)) {
           return { success: false, result: `File not found: ${oldPath}` };
-        }
-        if (!newPath.endsWith(".md")) {
-          newPath += ".md";
         }
         if (app.vault.getAbstractFileByPath(newPath)) {
           return { success: false, result: `File already exists: ${newPath}` };

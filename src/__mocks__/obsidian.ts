@@ -5,6 +5,12 @@ export class TFile {
   name = "";
   extension = "";
   basename = "";
+  stat = { size: 0, mtime: 0, ctime: 0 };
+}
+export class TFolder {
+  path = "";
+  name = "";
+  children: Array<TFile | TFolder> = [];
 }
 export function requestUrl(_options: unknown): Promise<unknown> {
   throw new Error("requestUrl is not available in tests");

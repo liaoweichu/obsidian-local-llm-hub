@@ -5,11 +5,11 @@ export const readNoteTool: ToolDefinition = {
   type: "function",
   function: {
     name: "read_note",
-    description: "Read the full content of a note by its file path.",
+    description: "Read the full content of a text-based vault file by its file path.",
     parameters: {
       type: "object",
       properties: {
-        path: { type: "string", description: "File path relative to vault root (e.g. 'folder/note.md')" },
+        path: { type: "string", description: "File path relative to vault root (e.g. 'folder/note.md' or 'folder/board.canvas')" },
       },
       required: ["path"],
     },
@@ -20,12 +20,12 @@ const createNote: ToolDefinition = {
   type: "function",
   function: {
     name: "create_note",
-    description: "Create a new note with the given content. Fails if the file already exists.",
+    description: "Create a new text-based vault file with the given content. Fails if the file already exists.",
     parameters: {
       type: "object",
       properties: {
-        path: { type: "string", description: "File path for the new note (e.g. 'folder/new-note.md')" },
-        content: { type: "string", description: "Content of the new note (markdown)" },
+        path: { type: "string", description: "File path for the new vault file. If no extension is provided, .md is added automatically." },
+        content: { type: "string", description: "Text content for the file (for example Markdown, Canvas JSON, Bases YAML, or plain text)" },
       },
       required: ["path", "content"],
     },
@@ -36,7 +36,7 @@ const searchNotes: ToolDefinition = {
   type: "function",
   function: {
     name: "search_notes",
-    description: "Search for notes containing the given query text in their content or filename.",
+    description: "Search text-based vault files containing the given query text in their content or filename.",
     parameters: {
       type: "object",
       properties: {
@@ -52,7 +52,7 @@ const listNotes: ToolDefinition = {
   type: "function",
   function: {
     name: "list_notes",
-    description: "List markdown notes in a folder. Returns file paths.",
+    description: "List text-based vault files in a folder. Returns file paths.",
     parameters: {
       type: "object",
       properties: {
@@ -83,7 +83,7 @@ const getActiveNote: ToolDefinition = {
   type: "function",
   function: {
     name: "get_active_note",
-    description: "Get information about the currently active (open) note, including its path and content.",
+    description: "Get information about the currently active (open) vault file, including its path and content.",
     parameters: {
       type: "object",
       properties: {},
@@ -96,11 +96,11 @@ const updateNote: ToolDefinition = {
   type: "function",
   function: {
     name: "update_note",
-    description: "Update the content of an existing note. Supports replace, append, or prepend modes.",
+    description: "Update the content of an existing text-based vault file. Supports replace, append, or prepend modes.",
     parameters: {
       type: "object",
       properties: {
-        path: { type: "string", description: "File path of the note to update" },
+        path: { type: "string", description: "File path of the vault file to update" },
         content: { type: "string", description: "The new content" },
         mode: { type: "string", description: "Update mode", enum: ["replace", "append", "prepend"] },
       },
@@ -113,7 +113,7 @@ const renameNote: ToolDefinition = {
   type: "function",
   function: {
     name: "rename_note",
-    description: "Rename or move a note to a new path.",
+    description: "Rename or move a text-based vault file to a new path.",
     parameters: {
       type: "object",
       properties: {
@@ -144,12 +144,12 @@ const proposeEdit: ToolDefinition = {
   type: "function",
   function: {
     name: "propose_edit",
-    description: "Propose an edit to an existing note. Provide the full new content. The user will review the diff before applying.",
+    description: "Propose an edit to an existing text-based vault file. Provide the full new content. The user will review the diff before applying.",
     parameters: {
       type: "object",
       properties: {
-        path: { type: "string", description: "File path of the note to edit" },
-        content: { type: "string", description: "The full new content of the note" },
+        path: { type: "string", description: "File path of the vault file to edit" },
+        content: { type: "string", description: "The full new content of the vault file" },
       },
       required: ["path", "content"],
     },
