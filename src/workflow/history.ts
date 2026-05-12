@@ -314,7 +314,7 @@ export class ExecutionHistoryManager {
           // Skip encrypted files
           if (isEncryptedFile(content)) continue;
 
-          const record: ExecutionRecord = JSON.parse(content);
+          const record = JSON.parse(content) as ExecutionRecord;
           if (record.workflowPath !== workflowPath || record.id === excludeId) continue;
 
           const hasSnapshots = record.steps.some(s => s.variablesSnapshot);

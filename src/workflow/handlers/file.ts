@@ -16,6 +16,14 @@ function isBinaryExtension(extension: string): boolean {
   return BINARY_EXTENSIONS.includes(extension.toLowerCase());
 }
 
+function isFileExplorerData(value: unknown): value is FileExplorerData {
+  return typeof value === "object"
+    && value !== null
+    && typeof (value as Partial<FileExplorerData>).data === "string"
+    && typeof (value as Partial<FileExplorerData>).contentType === "string"
+    && typeof (value as Partial<FileExplorerData>).extension === "string";
+}
+
 function getMimeType(extension: string): string {
   const mimeTypes: Record<string, string> = {
     md: "text/markdown", txt: "text/plain", json: "application/json",
@@ -194,10 +202,11 @@ export async function handleFileSaveNode(
 
   let fileData: FileExplorerData;
   try {
-    fileData = JSON.parse(sourceValue);
-    if (!fileData.data || !fileData.contentType) {
+    const parsed = JSON.parse(sourceValue) as unknown;
+    if (!isFileExplorerData(parsed)) {
       throw new Error("Invalid FileExplorerData structure");
     }
+    fileData = parsed;
   } catch {
     throw new Error(`Source variable '${sourceProp}' is not valid FileExplorerData JSON`);
   }

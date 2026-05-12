@@ -1,6 +1,7 @@
 import { Modal, App } from "obsidian";
 import type { Attachment } from "src/types";
 import { t } from "src/i18n";
+import { decodeBase64Utf8, encodeBase64Utf8 } from "src/utils/base64";
 
 export interface RagSourceModalResult {
   attachment: Attachment;
@@ -30,7 +31,7 @@ export class RagSourceModal extends Modal {
     const header = contentEl.createDiv({ cls: "llm-hub-rag-text-modal-header" });
     header.createEl("h3", { text: att.name });
     if (att.sourcePath) {
-      const pathEl = header.createEl("div", {
+      const pathEl = header.createDiv({
         cls: "llm-hub-rag-text-modal-path",
         text: att.sourcePath,
       });
@@ -54,7 +55,7 @@ export class RagSourceModal extends Modal {
       cls: "mod-cta",
     });
     saveBtn.addEventListener("click", () => {
-      const newData = btoa(unescape(encodeURIComponent(textarea.value)));
+      const newData = encodeBase64Utf8(textarea.value);
       this.onResult({ attachment: { ...att, data: newData } });
       this.close();
     });
@@ -66,7 +67,7 @@ export class RagSourceModal extends Modal {
       this.close();
     });
 
-    setTimeout(() => textarea.focus(), 50);
+    activeWindow.setTimeout(() => textarea.focus(), 50);
   }
 
   onClose() {
@@ -76,7 +77,7 @@ export class RagSourceModal extends Modal {
 
 function decodeAttachmentText(base64: string): string {
   try {
-    return decodeURIComponent(escape(atob(base64)));
+    return decodeBase64Utf8(base64);
   } catch {
     return atob(base64);
   }

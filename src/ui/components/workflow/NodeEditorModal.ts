@@ -168,8 +168,8 @@ export class NodeEditorModal extends Modal {
         margin: "0",
       });
 
-      document.addEventListener("mousemove", onMouseMove);
-      document.addEventListener("mouseup", onMouseUp);
+      activeDocument.addEventListener("mousemove", onMouseMove);
+      activeDocument.addEventListener("mouseup", onMouseUp);
     };
 
     const onMouseMove = (e: MouseEvent) => {
@@ -184,8 +184,8 @@ export class NodeEditorModal extends Modal {
 
     const onMouseUp = () => {
       isDragging = false;
-      document.removeEventListener("mousemove", onMouseMove);
-      document.removeEventListener("mouseup", onMouseUp);
+      activeDocument.removeEventListener("mousemove", onMouseMove);
+      activeDocument.removeEventListener("mouseup", onMouseUp);
     };
 
     dragHandle.addEventListener("mousedown", onMouseDown);
@@ -524,11 +524,11 @@ export class NodeEditorModal extends Modal {
       if (suggestions.length === 0) return;
 
       currentSuggestions = suggestions;
-      suggestionContainer = document.createElement("div");
+      suggestionContainer = activeDocument.createDiv();
       suggestionContainer.addClass("llm-hub-workflow-path-suggestions");
 
       suggestions.forEach((suggestion, index) => {
-        const item = document.createElement("div");
+        const item = activeDocument.createDiv();
         item.addClass("llm-hub-workflow-path-suggestion-item");
         if (index === selectedIndex) {
           item.addClass("is-selected");
@@ -626,7 +626,7 @@ export class NodeEditorModal extends Modal {
 
     inputEl.addEventListener("blur", () => {
       // Delay to allow click events on suggestions
-      setTimeout(() => hideSuggestions(), 200);
+      activeWindow.setTimeout(() => hideSuggestions(), 200);
     });
   }
 

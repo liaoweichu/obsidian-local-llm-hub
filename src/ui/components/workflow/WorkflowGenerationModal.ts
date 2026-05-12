@@ -97,7 +97,7 @@ export class WorkflowGenerationModal extends Modal {
     // Execution history info (if steps are selected)
     if (this.executionStepsCount > 0) {
       const historySection = contentEl.createDiv({ cls: "llm-hub-workflow-generation-history-info" });
-      historySection.createEl("span", {
+      historySection.createSpan( {
         cls: "llm-hub-workflow-generation-history-badge",
         text: t("workflow.generation.executionHistoryIncluded", { count: this.executionStepsCount }),
       });
@@ -219,8 +219,8 @@ export class WorkflowGenerationModal extends Modal {
         margin: "0",
       });
 
-      document.addEventListener("mousemove", onMouseMove);
-      document.addEventListener("mouseup", onMouseUp);
+      activeDocument.addEventListener("mousemove", onMouseMove);
+      activeDocument.addEventListener("mouseup", onMouseUp);
       e.preventDefault();
     };
 
@@ -236,8 +236,8 @@ export class WorkflowGenerationModal extends Modal {
 
     const onMouseUp = () => {
       isDragging = false;
-      document.removeEventListener("mousemove", onMouseMove);
-      document.removeEventListener("mouseup", onMouseUp);
+      activeDocument.removeEventListener("mousemove", onMouseMove);
+      activeDocument.removeEventListener("mouseup", onMouseUp);
     };
 
     dragHandle.addEventListener("mousedown", onMouseDown);
@@ -248,7 +248,7 @@ export class WorkflowGenerationModal extends Modal {
       this.thinkingSectionEl.removeClass("is-hidden");
     }
     if (this.pendingThinkingSeparator && this.thinkingContainerEl) {
-      const sep = document.createElement("div");
+      const sep = activeDocument.createDiv();
       sep.className = "llm-hub-workflow-generation-thinking-separator";
       sep.textContent = `── ${this.pendingThinkingSeparator} ──`;
       this.thinkingContainerEl.appendChild(sep);
@@ -256,7 +256,7 @@ export class WorkflowGenerationModal extends Modal {
     }
     this.thinkingText += content;
     if (this.thinkingContainerEl) {
-      const span = document.createElement("span");
+      const span = activeDocument.createSpan();
       span.textContent = content;
       this.thinkingContainerEl.appendChild(span);
       this.thinkingContainerEl.scrollTop = this.thinkingContainerEl.scrollHeight;
@@ -273,7 +273,7 @@ export class WorkflowGenerationModal extends Modal {
   appendPlan(content: string): void {
     this.planText += content;
     if (this.planContainerEl) {
-      const span = document.createElement("span");
+      const span = activeDocument.createSpan();
       span.textContent = content;
       this.planContainerEl.appendChild(span);
       this.planContainerEl.scrollTop = this.planContainerEl.scrollHeight;
@@ -283,7 +283,7 @@ export class WorkflowGenerationModal extends Modal {
   appendReview(content: string): void {
     this.reviewText += content;
     if (this.reviewContainerEl) {
-      const span = document.createElement("span");
+      const span = activeDocument.createSpan();
       span.textContent = content;
       this.reviewContainerEl.appendChild(span);
       this.reviewContainerEl.scrollTop = this.reviewContainerEl.scrollHeight;

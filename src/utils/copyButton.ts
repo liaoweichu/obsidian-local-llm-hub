@@ -25,7 +25,7 @@ export function createCopyButton(
     e.preventDefault();
     void navigator.clipboard.writeText(getText()).then(() => {
       btn.textContent = "✓";
-      setTimeout(() => { btn.textContent = label; }, 1200);
+      activeWindow.setTimeout(() => { btn.textContent = label; }, 1200);
     });
   });
   return btn;

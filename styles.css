@@ -2176,6 +2176,14 @@ body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) 
 }
 
 /* Workflow Prompt Modals */
+.llm-hub-modal-ignore-outside-click {
+  pointer-events: none;
+}
+
+.llm-hub-modal-interactive {
+  pointer-events: auto;
+}
+
 .llm-hub-workflow-file-prompt-modal,
 .llm-hub-workflow-value-prompt-modal,
 .llm-hub-workflow-selection-prompt-modal {

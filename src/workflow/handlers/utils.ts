@@ -75,7 +75,7 @@ export function replaceVariables(
     previousResult = result;
     iterations++;
 
-    result = result.replace(/\{\{([\w.[\]]+)(:json)?\}\}/g, (match, fullPath, jsonModifier) => {
+    result = result.replace(/\{\{([\w.[\]]+)(:json)?\}\}/g, (match: string, fullPath: string, jsonModifier?: string) => {
     const shouldJsonEscape = jsonModifier === ":json";
     const dotIndex = fullPath.indexOf(".");
     const bracketIndex = fullPath.indexOf("[");
@@ -244,7 +244,7 @@ export function evaluateCondition(
       return bothNumbers ? leftNum >= rightNum : left >= right;
     case "contains":
       try {
-        const leftParsed = JSON.parse(left);
+        const leftParsed = JSON.parse(left) as unknown;
         if (Array.isArray(leftParsed)) {
           return leftParsed.includes(right);
         }

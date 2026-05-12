@@ -46,6 +46,7 @@ import MessageList from "./MessageList";
 import InputArea, { type InputAreaHandle } from "./InputArea";
 import { t } from "src/i18n";
 import { formatError } from "src/utils/error";
+import { decodeBase64Utf8 } from "src/utils/base64";
 import { findFileMentionOccurrences } from "src/utils/mentionResolver";
 
 export interface ChatRef {
@@ -259,9 +260,9 @@ const Chat = forwardRef<ChatRef, ChatProps>(({ plugin }, ref) => {
       const sel = plugin.getSelection();
       setHasSelection(!!sel);
     };
-    const interval = setInterval(checkSelection, 2000);
+    const interval = activeWindow.setInterval(checkSelection, 2000);
     checkSelection();
-    return () => clearInterval(interval);
+    return () => activeWindow.clearInterval(interval);
   }, [plugin]);
 
   const refreshVaultFiles = useCallback(() => {
@@ -390,7 +391,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({ plugin }, ref) => {
       await plugin.app.vault.create(fileName, markdown);
       new Notice(t("chat.savedAsNote", { path: fileName }));
       setSaveNoteState("saved");
-      setTimeout(() => setSaveNoteState("idle"), 3000);
+      activeWindow.setTimeout(() => setSaveNoteState("idle"), 3000);
     } catch (error) {
       new Notice(t("common.error") + formatError(error));
       setSaveNoteState("idle");
@@ -549,7 +550,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({ plugin }, ref) => {
       const header = `Attachment: ${att.name} (${att.mimeType || att.type})`;
       if (att.type === "text") {
         try {
-          const decoded = decodeURIComponent(escape(atob(att.data))).trim();
+          const decoded = decodeBase64Utf8(att.data).trim();
           const content = decoded.length > 12000
             ? `${decoded.slice(0, 12000)}\n[Truncated]`
             : decoded;
@@ -688,9 +689,9 @@ const Chat = forwardRef<ChatRef, ChatProps>(({ plugin }, ref) => {
       }
 
       // Add skill workflow tool if any active skill has workflows
-      const skillWorkflowMap = loadedSkillsList.length > 0
+      const skillWorkflowMap: Map<string, { skill: LoadedSkill; workflowRef: SkillWorkflowRef; vaultPath: string }> = loadedSkillsList.length > 0
         ? collectSkillWorkflows(loadedSkillsList)
-        : new Map();
+        : new Map<string, { skill: LoadedSkill; workflowRef: SkillWorkflowRef; vaultPath: string }>();
       if (skillWorkflowMap.size > 0 && !isAnythingLlm) {
         tools.push(skillWorkflowTool);
       }

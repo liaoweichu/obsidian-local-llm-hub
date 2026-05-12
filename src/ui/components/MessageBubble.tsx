@@ -113,7 +113,7 @@ export default function MessageBubble({
       }
     }
     setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    activeWindow.setTimeout(() => setCopied(false), 2000);
   };
 
   return (

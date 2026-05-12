@@ -694,6 +694,27 @@ interface PdfExtractResult {
   pageOffsets: number[];
 }
 
+interface PdfJsDocument {
+  numPages: number;
+  getPage(pageNumber: number): Promise<PdfJsPage>;
+}
+
+interface PdfJsPage {
+  getTextContent(): Promise<PdfJsTextContent>;
+}
+
+interface PdfJsTextContent {
+  items: PdfJsTextItem[];
+}
+
+interface PdfJsTextItem {
+  str?: unknown;
+}
+
+interface PdfJsLib {
+  getDocument(source: { data: ArrayBuffer }): { promise: Promise<PdfJsDocument> };
+}
+
 /**
  * Extract text from a PDF file using Obsidian's built-in PDF.js.
  * Returns null if the PDF has no extractable text (e.g. scanned/image-only).
@@ -701,15 +722,13 @@ interface PdfExtractResult {
  */
 async function extractPdfText(app: App, file: TFile): Promise<PdfExtractResult | null> {
   const buffer = await app.vault.readBinary(file);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const pdfjsLib: any = await loadPdfJs();
+  const pdfjsLib = await loadPdfJs() as PdfJsLib;
   const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
   const pageTexts: string[] = [];
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const text = content.items.map((item: any) => item.str).join(" ");
+    const text = content.items.map((item) => typeof item.str === "string" ? item.str : "").join(" ");
     pageTexts.push(text.trim() ? text : "");
   }
   // Build joined text with page offset tracking

@@ -64,7 +64,7 @@ export class RagChunkEditModal extends Modal {
     const header = contentEl.createDiv({ cls: "llm-hub-rag-chunk-edit-header" });
     const fileName = this.result.filePath.split("/").pop() || this.result.filePath;
     header.createEl("h3", { text: fileName });
-    header.createEl("div", {
+    header.createDiv( {
       cls: "llm-hub-rag-text-modal-path",
       text: this.result.filePath,
     });
@@ -125,7 +125,7 @@ export class RagChunkEditModal extends Modal {
       this.close();
     });
 
-    setTimeout(() => this.textarea?.focus(), 50);
+    activeWindow.setTimeout(() => this.textarea?.focus(), 50);
   }
 
   onClose() {

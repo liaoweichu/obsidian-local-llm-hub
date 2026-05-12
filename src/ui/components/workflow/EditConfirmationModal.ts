@@ -16,6 +16,14 @@ export interface DiffLine {
   newLineNum?: number;
 }
 
+function setCssProps(el: HTMLElement, props: Partial<CSSStyleDeclaration>): void {
+  for (const [name, value] of Object.entries(props)) {
+    if (typeof value === "string") {
+      el.style.setProperty(name.replace(/[A-Z]/g, (char) => `-${char.toLowerCase()}`), value);
+    }
+  }
+}
+
 /**
  * Calculate line-based diff between two strings using LCS algorithm
  */
@@ -27,9 +35,7 @@ export function computeLineDiff(oldText: string, newText: string): DiffLine[] {
   // Build LCS table
   const m = oldLines.length;
   const n = newLines.length;
-  const lcs: number[][] = Array(m + 1)
-    .fill(null)
-    .map(() => Array(n + 1).fill(0));
+  const lcs: number[][] = Array.from({ length: m + 1 }, () => Array<number>(n + 1).fill(0));
 
   for (let i = 1; i <= m; i++) {
     for (let j = 1; j <= n; j++) {
@@ -123,8 +129,8 @@ export class EditConfirmationModal extends Modal {
     const { contentEl, modalEl, containerEl } = this;
 
     // Prevent closing on outside click
-    containerEl.setCssProps({ "pointer-events": "none" });
-    modalEl.setCssProps({ "pointer-events": "auto" });
+    containerEl.addClass("llm-hub-modal-ignore-outside-click");
+    modalEl.addClass("llm-hub-modal-interactive");
 
     // Add modal classes for styling
     modalEl.addClass("llm-hub-workflow-confirm-modal");
@@ -139,14 +145,14 @@ export class EditConfirmationModal extends Modal {
     titleRow.createEl("h3", { text: t("workflowConfirm.title") });
 
     const modeLabel = this.getModeLabel();
-    titleRow.createEl("span", {
+    titleRow.createSpan({
       text: modeLabel,
       cls: "llm-hub-workflow-confirm-mode",
     });
 
     // File path display
     const pathRow = header.createDiv({ cls: "llm-hub-workflow-confirm-path" });
-    pathRow.createEl("span", { text: t("workflowConfirm.file") });
+    pathRow.createSpan({ text: t("workflowConfirm.file") });
     pathRow.createEl("strong", { text: this.filePath });
 
     // Content preview
@@ -157,7 +163,7 @@ export class EditConfirmationModal extends Modal {
     const previewLabel = previewContainer.createDiv({
       cls: "llm-hub-workflow-confirm-preview-label",
     });
-    previewLabel.createEl("span", { text: t("workflowConfirm.changes") });
+    previewLabel.createSpan({ text: t("workflowConfirm.changes") });
 
     const previewContent = previewContainer.createDiv({
       cls: "llm-hub-workflow-confirm-preview-content",
@@ -283,7 +289,7 @@ export class EditConfirmationModal extends Modal {
   private addResizeHandles(modalEl: HTMLElement) {
     const directions = ["n", "e", "s", "w", "ne", "nw", "se", "sw"];
     for (const dir of directions) {
-      const handle = document.createElement("div");
+      const handle = activeDocument.createDiv();
       handle.className = `llm-hub-workflow-confirm-resize-handle llm-hub-workflow-confirm-resize-${dir}`;
       handle.dataset.direction = dir;
       modalEl.appendChild(handle);
@@ -303,7 +309,7 @@ export class EditConfirmationModal extends Modal {
       this.modalStartX = rect.left;
       this.modalStartY = rect.top;
 
-      modalEl.setCssProps({
+      setCssProps(modalEl, {
         position: "fixed",
         margin: "0",
         transform: "none",
@@ -311,8 +317,8 @@ export class EditConfirmationModal extends Modal {
         top: `${rect.top}px`,
       });
 
-      document.addEventListener("mousemove", onMouseMove);
-      document.addEventListener("mouseup", onMouseUp);
+      activeDocument.addEventListener("mousemove", onMouseMove);
+      activeDocument.addEventListener("mouseup", onMouseUp);
       e.preventDefault();
     };
 
@@ -322,7 +328,7 @@ export class EditConfirmationModal extends Modal {
       const deltaX = e.clientX - this.dragStartX;
       const deltaY = e.clientY - this.dragStartY;
 
-      modalEl.setCssProps({
+      setCssProps(modalEl, {
         left: `${this.modalStartX + deltaX}px`,
         top: `${this.modalStartY + deltaY}px`,
       });
@@ -330,8 +336,8 @@ export class EditConfirmationModal extends Modal {
 
     const onMouseUp = () => {
       this.isDragging = false;
-      document.removeEventListener("mousemove", onMouseMove);
-      document.removeEventListener("mouseup", onMouseUp);
+      activeDocument.removeEventListener("mousemove", onMouseMove);
+      activeDocument.removeEventListener("mouseup", onMouseUp);
     };
 
     header.addEventListener("mousedown", onMouseDown);
@@ -350,7 +356,7 @@ export class EditConfirmationModal extends Modal {
       this.modalStartX = rect.left;
       this.modalStartY = rect.top;
 
-      modalEl.setCssProps({
+      setCssProps(modalEl, {
         position: "fixed",
         margin: "0",
         transform: "none",
@@ -360,8 +366,8 @@ export class EditConfirmationModal extends Modal {
         height: `${rect.height}px`,
       });
 
-      document.addEventListener("mousemove", onMouseMove);
-      document.addEventListener("mouseup", onMouseUp);
+      activeDocument.addEventListener("mousemove", onMouseMove);
+      activeDocument.addEventListener("mouseup", onMouseUp);
       e.preventDefault();
       e.stopPropagation();
     };
@@ -393,7 +399,7 @@ export class EditConfirmationModal extends Modal {
         newTop = this.modalStartY + (this.resizeStartHeight - newHeight);
       }
 
-      modalEl.setCssProps({
+      setCssProps(modalEl, {
         width: `${newWidth}px`,
         height: `${newHeight}px`,
         left: `${newLeft}px`,
@@ -403,8 +409,8 @@ export class EditConfirmationModal extends Modal {
 
     const onMouseUp = () => {
       this.isResizing = false;
-      document.removeEventListener("mousemove", onMouseMove);
-      document.removeEventListener("mouseup", onMouseUp);
+      activeDocument.removeEventListener("mousemove", onMouseMove);
+      activeDocument.removeEventListener("mouseup", onMouseUp);
     };
 
     handle.addEventListener("mousedown", onMouseDown);

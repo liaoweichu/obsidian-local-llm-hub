@@ -110,7 +110,7 @@ export class HistoryModal extends Modal {
     unlockBtn.addEventListener("click", () => void handleUnlock());
 
     // Focus input
-    setTimeout(() => input.focus(), 50);
+    activeWindow.setTimeout(() => input.focus(), 50);
   }
 
   private renderHistoryUI(contentEl: HTMLElement): void {
@@ -431,8 +431,8 @@ export class HistoryModal extends Modal {
         margin: "0",
       });
 
-      document.addEventListener("mousemove", onMouseMove);
-      document.addEventListener("mouseup", onMouseUp);
+      activeDocument.addEventListener("mousemove", onMouseMove);
+      activeDocument.addEventListener("mouseup", onMouseUp);
       e.preventDefault();
     };
 
@@ -448,8 +448,8 @@ export class HistoryModal extends Modal {
 
     const onMouseUp = () => {
       isDragging = false;
-      document.removeEventListener("mousemove", onMouseMove);
-      document.removeEventListener("mouseup", onMouseUp);
+      activeDocument.removeEventListener("mousemove", onMouseMove);
+      activeDocument.removeEventListener("mouseup", onMouseUp);
     };
 
     dragHandle.addEventListener("mousedown", onMouseDown);

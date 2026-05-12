@@ -22,7 +22,7 @@ export async function extractPdfPages(
   let pdfBytes: Uint8Array;
   const isAbsolute = filePath.startsWith("/") || /^[A-Z]:\\/i.test(filePath);
   if (isAbsolute) {
-    const fs = (globalThis as { require?: (id: string) => { promises: { readFile: (p: string) => Promise<Buffer> } } }).require?.("fs");
+    const fs = (activeWindow as unknown as { require?: (id: string) => { promises: { readFile: (p: string) => Promise<Buffer> } } }).require?.("fs");
     if (!fs) return null;
     const buffer = await fs.promises.readFile(filePath);
     pdfBytes = new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
@@ -42,9 +42,7 @@ export async function extractPdfPages(
   const pages = await chunkDoc.copyPages(pdfDoc, indices);
   for (const page of pages) chunkDoc.addPage(page);
   const extractedBytes = await chunkDoc.save();
-  const buffer = extractedBytes.buffer.slice(
-    extractedBytes.byteOffset,
-    extractedBytes.byteOffset + extractedBytes.byteLength,
-  );
-  return buffer as ArrayBuffer;
+  const output = new Uint8Array(extractedBytes.byteLength);
+  output.set(extractedBytes);
+  return output.buffer;
 }

@@ -73,15 +73,15 @@ export function executeSandboxedJS(
   timeoutMs = DEFAULT_TIMEOUT_MS,
 ): Promise<string> {
   return new Promise<string>((resolve, reject) => {
-    const iframe = document.createElement("iframe");
+    const iframe = activeDocument.createEl("iframe");
     iframe.sandbox.add("allow-scripts");
     iframe.setCssStyles({ display: "none" });
 
     let settled = false;
 
-    const cleanup = (timer: ReturnType<typeof setTimeout>) => {
-      clearTimeout(timer);
-      window.removeEventListener("message", handler);
+    const cleanup = (timer: number) => {
+      activeWindow.clearTimeout(timer);
+      activeWindow.removeEventListener("message", handler);
       if (iframe.parentNode) {
         iframe.parentNode.removeChild(iframe);
       }
@@ -89,31 +89,32 @@ export function executeSandboxedJS(
 
     const handler = (event: MessageEvent) => {
       if (event.source !== iframe.contentWindow) return;
-      const data = event.data;
+      const data = event.data as unknown;
       if (!data || typeof data !== "object") return;
+      const message = data as { type?: unknown; value?: unknown; message?: unknown };
 
-      if (data.type === "ready" && !settled) {
+      if (message.type === "ready" && !settled) {
         iframe.contentWindow!.postMessage({ code, input }, "*");
         return;
       }
 
-      if (data.type === "result" && !settled) {
+      if (message.type === "result" && !settled) {
         settled = true;
         cleanup(timer);
-        resolve(typeof data.value === "string" ? data.value : String(data.value ?? ""));
+        resolve(typeof message.value === "string" ? message.value : JSON.stringify(message.value ?? ""));
         return;
       }
 
-      if (data.type === "error" && !settled) {
+      if (message.type === "error" && !settled) {
         settled = true;
         cleanup(timer);
-        reject(new Error(data.message || "Script execution error"));
+        reject(new Error(typeof message.message === "string" ? message.message : "Script execution error"));
       }
     };
 
-    window.addEventListener("message", handler);
+    activeWindow.addEventListener("message", handler);
 
-    const timer = setTimeout(() => {
+    const timer = activeWindow.setTimeout(() => {
       if (!settled) {
         settled = true;
         cleanup(timer);
@@ -122,6 +123,6 @@ export function executeSandboxedJS(
     }, timeoutMs);
 
     iframe.srcdoc = SANDBOX_HTML;
-    document.body.appendChild(iframe);
+    activeDocument.body.appendChild(iframe);
   });
 }

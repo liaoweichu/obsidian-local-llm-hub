@@ -154,7 +154,7 @@ class WorkflowConfirmModal extends Modal {
 
     if (showInstructions) {
       const instrLabel = scrollable.createDiv({ cls: "llm-hub-edit-confirm-preview-label" });
-      instrLabel.createEl("span", { text: t("workflowModal.skillInstructionsChanges") });
+      instrLabel.createSpan( { text: t("workflowModal.skillInstructionsChanges") });
       if (instructionsChanged) {
         const instrWrapper = scrollable.createDiv({ cls: "llm-hub-workflow-confirm-diff-wrapper" });
         this.instructionsDiffState = renderDiffView(
@@ -174,7 +174,7 @@ class WorkflowConfirmModal extends Modal {
 
     const yamlChanged = this.oldYaml !== this.newYaml;
     const diffLabel = scrollable.createDiv({ cls: "llm-hub-edit-confirm-preview-label" });
-    diffLabel.createEl("span", { text: t("workflowModal.changes") });
+    diffLabel.createSpan( { text: t("workflowModal.changes") });
     if (yamlChanged) {
       const diffWrapper = scrollable.createDiv({ cls: "llm-hub-workflow-confirm-diff-wrapper llm-hub-workflow-confirm-diff" });
       this.diffState = renderDiffView(diffWrapper, this.oldYaml, this.newYaml, {
@@ -279,8 +279,8 @@ class WorkflowConfirmModal extends Modal {
         margin: "0",
       });
 
-      document.addEventListener("mousemove", onMouseMove);
-      document.addEventListener("mouseup", onMouseUp);
+      activeDocument.addEventListener("mousemove", onMouseMove);
+      activeDocument.addEventListener("mouseup", onMouseUp);
       e.preventDefault();
     };
 
@@ -296,8 +296,8 @@ class WorkflowConfirmModal extends Modal {
 
     const onMouseUp = () => {
       isDragging = false;
-      document.removeEventListener("mousemove", onMouseMove);
-      document.removeEventListener("mouseup", onMouseUp);
+      activeDocument.removeEventListener("mousemove", onMouseMove);
+      activeDocument.removeEventListener("mouseup", onMouseUp);
     };
 
     dragHandle.addEventListener("mousedown", onMouseDown);
@@ -473,7 +473,7 @@ export class AIWorkflowModal extends Modal {
       if (this.forceSkill) {
         this.outputPathEl.disabled = true;
       }
-      pathContainer.createEl("div", {
+      pathContainer.createDiv( {
         cls: "llm-hub-workflow-hint",
         text: t("aiWorkflow.pathHint"),
       });
@@ -524,7 +524,7 @@ export class AIWorkflowModal extends Modal {
     this.setupMentionAutocomplete();
 
     // Hint for @ mention
-    contentEl.createEl("div", {
+    contentEl.createDiv( {
       cls: "llm-hub-workflow-hint",
       text: t("aiWorkflow.mentionHint"),
     });
@@ -625,9 +625,9 @@ export class AIWorkflowModal extends Modal {
 
     // Focus appropriate field
     if (this.mode === "create") {
-      setTimeout(() => this.nameInputEl?.focus(), 50);
+      activeWindow.setTimeout(() => this.nameInputEl?.focus(), 50);
     } else {
-      setTimeout(() => this.descriptionEl?.focus(), 50);
+      activeWindow.setTimeout(() => this.descriptionEl?.focus(), 50);
     }
   }
 
@@ -738,7 +738,7 @@ export class AIWorkflowModal extends Modal {
     // Show paste response section, scroll it into view, and focus the textarea
     this.pasteSectionEl?.removeClass("is-hidden");
     this.pasteSectionEl?.scrollIntoView({ behavior: "smooth", block: "end" });
-    setTimeout(() => this.pasteTextareaEl?.focus(), 100);
+    activeWindow.setTimeout(() => this.pasteTextareaEl?.focus(), 100);
 
     new Notice(t("aiWorkflow.promptCopied"));
   }
@@ -1943,8 +1943,8 @@ ${formattedSteps}
         top: `${rect.top}px`,
       });
 
-      document.addEventListener("mousemove", onMouseMove);
-      document.addEventListener("mouseup", onMouseUp);
+      activeDocument.addEventListener("mousemove", onMouseMove);
+      activeDocument.addEventListener("mouseup", onMouseUp);
       e.preventDefault();
     };
 
@@ -1962,8 +1962,8 @@ ${formattedSteps}
 
     const onMouseUp = () => {
       this.isDragging = false;
-      document.removeEventListener("mousemove", onMouseMove);
-      document.removeEventListener("mouseup", onMouseUp);
+      activeDocument.removeEventListener("mousemove", onMouseMove);
+      activeDocument.removeEventListener("mouseup", onMouseUp);
     };
 
     header.addEventListener("mousedown", onMouseDown);
@@ -1972,7 +1972,7 @@ ${formattedSteps}
   private addResizeHandles(modalEl: HTMLElement): void {
     const directions = ["n", "e", "s", "w", "ne", "nw", "se", "sw"];
     for (const dir of directions) {
-      const handle = document.createElement("div");
+      const handle = activeDocument.createDiv();
       handle.className = `llm-hub-resize-handle llm-hub-resize-${dir}`;
       handle.dataset.direction = dir;
       modalEl.appendChild(handle);
@@ -2003,8 +2003,8 @@ ${formattedSteps}
         height: `${rect.height}px`,
       });
 
-      document.addEventListener("mousemove", onMouseMove);
-      document.addEventListener("mouseup", onMouseUp);
+      activeDocument.addEventListener("mousemove", onMouseMove);
+      activeDocument.addEventListener("mouseup", onMouseUp);
       e.preventDefault();
       e.stopPropagation();
     };
@@ -2046,8 +2046,8 @@ ${formattedSteps}
 
     const onMouseUp = () => {
       this.isResizing = false;
-      document.removeEventListener("mousemove", onMouseMove);
-      document.removeEventListener("mouseup", onMouseUp);
+      activeDocument.removeEventListener("mousemove", onMouseMove);
+      activeDocument.removeEventListener("mouseup", onMouseUp);
     };
 
     handle.addEventListener("mousedown", onMouseDown);
@@ -2120,7 +2120,7 @@ ${formattedSteps}
         this.hideMentionAutocomplete();
       }
     };
-    document.addEventListener("click", this.clickOutsideHandler);
+    activeDocument.addEventListener("click", this.clickOutsideHandler);
   }
 
   private buildMentionCandidates(query: string): MentionItem[] {
@@ -2212,7 +2212,7 @@ ${formattedSteps}
   onClose(): void {
     // Clean up event listener
     if (this.clickOutsideHandler) {
-      document.removeEventListener("click", this.clickOutsideHandler);
+      activeDocument.removeEventListener("click", this.clickOutsideHandler);
       this.clickOutsideHandler = null;
     }
     const { contentEl } = this;
@@ -2313,7 +2313,7 @@ export function parseWorkflowResponseWithError(response: string): { result: AIWo
       }>;
     };
     try {
-      parsed = parseYaml(yaml);
+      parsed = parseYaml(yaml) as typeof parsed;
     } catch (yamlErr) {
       return { result: null, error: `YAML syntax error: ${formatError(yamlErr)}` };
     }

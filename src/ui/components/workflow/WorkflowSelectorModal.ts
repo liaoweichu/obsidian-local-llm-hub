@@ -263,11 +263,11 @@ export class WorkflowSelectorModal extends Modal {
       if (folder !== currentFolder) {
         currentFolder = folder;
         const folderEl = this.fileListEl.createDiv({ cls: "llm-hub-workflow-selector-folder" });
-        folderEl.createEl("span", {
+        folderEl.createSpan( {
           cls: "llm-hub-workflow-selector-folder-icon",
           text: "\u25B6",
         });
-        folderEl.createEl("span", {
+        folderEl.createSpan( {
           text: folder || "/",
         });
       }
@@ -276,7 +276,7 @@ export class WorkflowSelectorModal extends Modal {
         cls: "llm-hub-workflow-selector-file-item",
         attr: { tabindex: "0" },
       });
-      fileItem.createEl("span", { text: file.basename });
+      fileItem.createSpan( { text: file.basename });
 
       if (this.selectedFile?.path === file.path) {
         fileItem.addClass("is-selected");
@@ -397,11 +397,11 @@ export class WorkflowSelectorModal extends Modal {
 
       // Header
       const header = nodeCard.createDiv({ cls: "llm-hub-workflow-node-header" });
-      header.createEl("span", {
+      header.createSpan( {
         cls: "llm-hub-workflow-node-type",
         text: nodeTypeLabels[node.type] || node.type,
       });
-      header.createEl("span", {
+      header.createSpan( {
         cls: "llm-hub-workflow-node-id",
         text: node.id,
       });
@@ -415,14 +415,14 @@ export class WorkflowSelectorModal extends Modal {
         const branchInfo = nodeCard.createDiv({ cls: "llm-hub-workflow-node-branch" });
 
         const trueRow = branchInfo.createDiv({ cls: "llm-hub-workflow-branch-row" });
-        trueRow.createEl("span", { cls: "llm-hub-workflow-branch-label llm-hub-workflow-branch-label-true", text: t("workflow.branchTrue") });
-        trueRow.createEl("span", { cls: "llm-hub-workflow-branch-arrow", text: "→" });
-        trueRow.createEl("span", { cls: "llm-hub-workflow-branch-target", text: node.trueNext || t("workflow.branchNext") });
+        trueRow.createSpan( { cls: "llm-hub-workflow-branch-label llm-hub-workflow-branch-label-true", text: t("workflow.branchTrue") });
+        trueRow.createSpan( { cls: "llm-hub-workflow-branch-arrow", text: "→" });
+        trueRow.createSpan( { cls: "llm-hub-workflow-branch-target", text: node.trueNext || t("workflow.branchNext") });
 
         const falseRow = branchInfo.createDiv({ cls: "llm-hub-workflow-branch-row" });
-        falseRow.createEl("span", { cls: "llm-hub-workflow-branch-label llm-hub-workflow-branch-label-false", text: t("workflow.branchFalse") });
-        falseRow.createEl("span", { cls: "llm-hub-workflow-branch-arrow", text: "→" });
-        falseRow.createEl("span", { cls: "llm-hub-workflow-branch-target", text: node.falseNext || t("workflow.branchEnd") });
+        falseRow.createSpan( { cls: "llm-hub-workflow-branch-label llm-hub-workflow-branch-label-false", text: t("workflow.branchFalse") });
+        falseRow.createSpan( { cls: "llm-hub-workflow-branch-arrow", text: "→" });
+        falseRow.createSpan( { cls: "llm-hub-workflow-branch-target", text: node.falseNext || t("workflow.branchEnd") });
       }
 
       // Arrow to next node (if not last and not branch node)
@@ -469,7 +469,7 @@ export class WorkflowSelectorModal extends Modal {
     }
 
     if (historyLines.length > 5) {
-      historyList.createEl("div", {
+      historyList.createDiv( {
         cls: "llm-hub-workflow-selector-history-more",
         text: `+${historyLines.length - 5} more`,
       });

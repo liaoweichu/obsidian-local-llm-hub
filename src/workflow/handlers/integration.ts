@@ -5,6 +5,10 @@ import { getRagStore } from "../../core/ragStore";
 import { WorkflowNode, ExecutionContext, PromptCallbacks } from "../types";
 import { replaceVariables } from "./utils";
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
 // Handle workflow node - execute a sub-workflow
 export async function handleWorkflowNode(
   node: WorkflowNode,
@@ -29,8 +33,8 @@ export async function handleWorkflowNode(
   if (inputStr) {
     const replacedInput = replaceVariables(inputStr, context);
     try {
-      const inputMapping = JSON.parse(replacedInput);
-      if (typeof inputMapping === "object" && inputMapping !== null) {
+      const inputMapping = JSON.parse(replacedInput) as unknown;
+      if (isRecord(inputMapping)) {
         for (const [key, value] of Object.entries(inputMapping)) {
           if (typeof value === "string" || typeof value === "number") {
             inputVariables.set(key, value);
@@ -64,8 +68,8 @@ export async function handleWorkflowNode(
   if (outputStr) {
     const replacedOutput = replaceVariables(outputStr, context);
     try {
-      const outputMapping = JSON.parse(replacedOutput);
-      if (typeof outputMapping === "object" && outputMapping !== null) {
+      const outputMapping = JSON.parse(replacedOutput) as unknown;
+      if (isRecord(outputMapping)) {
         for (const [parentVar, subVar] of Object.entries(outputMapping)) {
           if (typeof subVar === "string") {
             const value = resultVariables.get(subVar);
@@ -197,7 +201,7 @@ export async function handleObsidianCommandNode(
       await newLeaf.openFile(file);
       app.workspace.setActiveLeaf(newLeaf, { focus: true });
     }
-    await new Promise(resolve => setTimeout(resolve, 100));
+    await new Promise(resolve => activeWindow.setTimeout(resolve, 100));
   }
 
   await (app as unknown as { commands: { executeCommandById: (id: string) => Promise<void> } }).commands.executeCommandById(commandId);
@@ -241,7 +245,7 @@ export function handleJsonNode(
   }
 
   try {
-    const parsed = JSON.parse(jsonString);
+    const parsed = JSON.parse(jsonString) as unknown;
     context.variables.set(saveTo, JSON.stringify(parsed));
   } catch (e) {
     throw new Error(`Failed to parse JSON from '${sourceVar}': ${e instanceof Error ? e.message : String(e)}`);

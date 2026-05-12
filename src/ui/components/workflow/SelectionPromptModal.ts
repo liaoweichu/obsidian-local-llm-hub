@@ -58,8 +58,8 @@ export class SelectionPromptModal extends Modal {
     contentEl.addClass("llm-hub-workflow-selection-prompt-modal");
 
     // Prevent closing on outside click
-    containerEl.setCssProps({ 'pointer-events': 'none' });
-    modalEl.setCssProps({ 'pointer-events': 'auto' });
+    containerEl.addClass("llm-hub-modal-ignore-outside-click");
+    modalEl.addClass("llm-hub-modal-interactive");
 
     // Title
     contentEl.createEl("h2", { text: this.title || t("workflowModal.selectText") });
@@ -72,7 +72,7 @@ export class SelectionPromptModal extends Modal {
       cls: "llm-hub-workflow-select-file-btn",
     });
 
-    const selectedLabel = selectorContainer.createEl("span", {
+    const selectedLabel = selectorContainer.createSpan({
       text: t("workflowModal.noFileSelected"),
       cls: "llm-hub-workflow-selected-file-label",
     });

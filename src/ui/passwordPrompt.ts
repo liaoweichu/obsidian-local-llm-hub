@@ -43,7 +43,7 @@ export function promptForPassword(app: App): Promise<string | null> {
           }
         });
 
-        setTimeout(() => inputEl.focus(), 50);
+        activeWindow.setTimeout(() => inputEl.focus(), 50);
       }
 
       onClose(): void {

@@ -13,6 +13,22 @@ function createFileInfo(filePath: string): { path: string; basename: string; nam
   return { path: filePath, basename, name, extension };
 }
 
+function parsePathInfo(value: string): { path: string } | null {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (
+      typeof parsed === "object"
+      && parsed !== null
+      && typeof (parsed as { path?: unknown }).path === "string"
+    ) {
+      return { path: (parsed as { path: string }).path };
+    }
+  } catch {
+    // Invalid JSON
+  }
+  return null;
+}
+
 // Handle prompt-file node
 export async function handlePromptFileNode(
   node: WorkflowNode,
@@ -43,22 +59,14 @@ export async function handlePromptFileNode(
       throw new Error("File selection cancelled by user");
     }
   } else if (hotkeyActiveFile) {
-    try {
-      const fileInfo = JSON.parse(String(hotkeyActiveFile));
-      if (fileInfo.path) {
-        filePath = fileInfo.path as string;
-      }
-    } catch {
-      // Invalid JSON, fall through to dialog
+    const fileInfo = parsePathInfo(String(hotkeyActiveFile));
+    if (fileInfo) {
+      filePath = fileInfo.path;
     }
-  } else if (eventFile) {
-    try {
-      const fileInfo = JSON.parse(eventFile as string);
-      if (fileInfo.path) {
-        filePath = fileInfo.path as string;
-      }
-    } catch {
-      // Invalid JSON, fall through to dialog
+  } else if (typeof eventFile === "string") {
+    const fileInfo = parsePathInfo(eventFile);
+    if (fileInfo) {
+      filePath = fileInfo.path;
     }
   }
 
@@ -122,8 +130,8 @@ export async function handlePromptSelectionNode(
     context.variables.set(saveTo, fullContent);
 
     if (saveSelectionTo && hotkeyActiveFile) {
-      try {
-        const fileInfo = JSON.parse(String(hotkeyActiveFile));
+      const fileInfo = parsePathInfo(String(hotkeyActiveFile));
+      if (fileInfo) {
         const lines = fullContent.split("\n");
         context.variables.set(saveSelectionTo, JSON.stringify({
           filePath: fileInfo.path,
@@ -132,8 +140,6 @@ export async function handlePromptSelectionNode(
           start: 0,
           end: fullContent.length,
         }));
-      } catch {
-        // Invalid JSON
       }
     }
     return;
@@ -161,10 +167,10 @@ export async function handlePromptSelectionNode(
     return;
   }
 
-  if (eventFile) {
-    try {
-      const fileInfo = JSON.parse(eventFile as string);
-      if (fileInfo.path) {
+  if (typeof eventFile === "string") {
+    const fileInfo = parsePathInfo(eventFile);
+    if (fileInfo) {
+      try {
         const file = app.vault.getAbstractFileByPath(fileInfo.path);
         if (file && file instanceof TFile) {
           const content = await app.vault.read(file);
@@ -182,9 +188,9 @@ export async function handlePromptSelectionNode(
           }
           return;
         }
+      } catch {
+        // Invalid event file
       }
-    } catch {
-      // Invalid JSON
     }
   }
 
@@ -255,10 +261,15 @@ export async function handleDialogNode(
   let defaults: { input?: string; selected?: string[] } | undefined;
   if (defaultsProp) {
     try {
-      const parsed = JSON.parse(replaceVariables(defaultsProp, context));
+      const parsed = JSON.parse(replaceVariables(defaultsProp, context)) as unknown;
+      const parsedDefaults = typeof parsed === "object" && parsed !== null
+        ? parsed as { input?: unknown; selected?: unknown }
+        : {};
       defaults = {
-        input: parsed.input,
-        selected: Array.isArray(parsed.selected) ? parsed.selected : undefined,
+        input: typeof parsedDefaults.input === "string" ? parsedDefaults.input : undefined,
+        selected: Array.isArray(parsedDefaults.selected)
+          ? parsedDefaults.selected.filter((item): item is string => typeof item === "string")
+          : undefined,
       };
     } catch {
       // Invalid JSON

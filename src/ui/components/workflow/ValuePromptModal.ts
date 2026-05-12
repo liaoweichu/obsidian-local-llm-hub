@@ -28,8 +28,8 @@ export class ValuePromptModal extends Modal {
     contentEl.addClass("llm-hub-workflow-value-prompt-modal");
 
     // Prevent closing on outside click
-    containerEl.setCssProps({ 'pointer-events': 'none' });
-    modalEl.setCssProps({ 'pointer-events': 'auto' });
+    containerEl.addClass("llm-hub-modal-ignore-outside-click");
+    modalEl.addClass("llm-hub-modal-interactive");
 
     // Title
     contentEl.createEl("h2", { text: this.title || t("workflowModal.enterValue") });
@@ -85,7 +85,7 @@ export class ValuePromptModal extends Modal {
     });
 
     // Focus input
-    setTimeout(() => this.inputEl?.focus(), 50);
+    activeWindow.setTimeout(() => this.inputEl?.focus(), 50);
   }
 
   private confirmValue(): void {

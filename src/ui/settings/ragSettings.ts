@@ -13,6 +13,8 @@ interface SettingsContext {
   display: () => void;
 }
 
+const EMBEDDING_BASE_URL_PLACEHOLDER = "http://localhost:8001";
+
 export function displayRagSettings(containerEl: HTMLElement, ctx: SettingsContext): void {
   const { plugin, display } = ctx;
 
@@ -187,8 +189,7 @@ function displaySelectedRagSetting(
     .setDesc(t("settings.ragEmbeddingBaseUrlDesc"))
     .addText((text) => {
       text
-        // eslint-disable-next-line obsidianmd/ui/sentence-case
-        .setPlaceholder("http://localhost:8001")
+        .setPlaceholder(EMBEDDING_BASE_URL_PLACEHOLDER)
         .setValue(ragSetting.embeddingBaseUrl || "")
         .onChange((value) => {
           void updateSetting({ embeddingBaseUrl: value.trim() }).catch((err) => new Notice(String(err)));
@@ -441,7 +442,7 @@ function displaySelectedRagSetting(
             }));
             progressText.setText(`${t("common.error")}: ${err instanceof Error ? err.message : String(err)}`);
             progressText.addClass("llm-hub-settings-sync-progress-error");
-            window.setTimeout(() => progressContainer.addClass("llm-hub-hidden"), 2000);
+            activeWindow.setTimeout(() => progressContainer.addClass("llm-hub-hidden"), 2000);
           } finally {
             btn.setButtonText(t("settings.ragSync"));
             btn.setDisabled(false);

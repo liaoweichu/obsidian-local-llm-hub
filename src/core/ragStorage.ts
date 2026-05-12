@@ -24,6 +24,17 @@ export interface RagIndex {
   chunkOverlap?: number;
 }
 
+interface ExternalChunkMeta {
+  file_path?: unknown;
+  start_offset?: unknown;
+  startOffset?: unknown;
+  text?: unknown;
+}
+
+interface ExternalRagIndex {
+  meta?: ExternalChunkMeta[];
+}
+
 const RAG_DIR = `${WORKSPACE_FOLDER}/rag`;
 const META_FILE = "rag-index.json";
 const VECTORS_FILE = "rag-vectors.bin";
@@ -33,9 +44,13 @@ export function sanitizeSettingName(name: string): string {
 }
 
 function getNodeRequire(): ((id: string) => unknown) | null {
+  const runtimeWindow = activeWindow as unknown as {
+    require?: (id: string) => unknown;
+    module?: { require?: (id: string) => unknown };
+  };
   const loader =
-    (globalThis as unknown as { require?: (id: string) => unknown }).require ||
-    (globalThis as unknown as { module?: { require?: (id: string) => unknown } }).module?.require;
+    runtimeWindow.require ||
+    runtimeWindow.module?.require;
   return loader || null;
 }
 
@@ -230,15 +245,17 @@ export async function loadExternalRagIndex(dirPath: string): Promise<RagIndex | 
     const path = loader?.("path") as { join: (...args: string[]) => string } | undefined;
     if (!fs || !path) return null;
     const content = await fs.promises.readFile(path.join(dirPath, META_FILE), "utf-8");
-    const raw = JSON.parse(content);
+    const raw = JSON.parse(content) as ExternalRagIndex & Partial<RagIndex>;
 
     // Normalize external index meta fields (e.g. file_path -> filePath, start_offset -> startOffset)
     if (raw.meta && raw.meta.length > 0 && !("filePath" in raw.meta[0]) && ("file_path" in raw.meta[0])) {
-      raw.meta = raw.meta.map((m: Record<string, unknown>) => ({
+      raw.meta = raw.meta.map((m) => ({
         ...m,
-        filePath: m.file_path as string,
-        startOffset: (m.start_offset as number) ?? (m.startOffset as number) ?? 0,
-        text: (m.text as string) || "",
+        filePath: typeof m.file_path === "string" ? m.file_path : "",
+        startOffset: typeof m.start_offset === "number"
+          ? m.start_offset
+          : typeof m.startOffset === "number" ? m.startOffset : 0,
+        text: typeof m.text === "string" ? m.text : "",
       }));
     }
 

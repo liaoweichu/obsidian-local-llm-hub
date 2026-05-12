@@ -58,8 +58,8 @@ export class FilePromptModal extends Modal {
     this.component.load();
 
     // Prevent closing on outside click
-    containerEl.setCssProps({ 'pointer-events': 'none' });
-    modalEl.setCssProps({ 'pointer-events': 'auto' });
+    containerEl.addClass("llm-hub-modal-ignore-outside-click");
+    modalEl.addClass("llm-hub-modal-interactive");
 
     // Title
     contentEl.createEl("h2", { text: this.title || t("workflowModal.selectFile") });
@@ -72,7 +72,7 @@ export class FilePromptModal extends Modal {
       cls: "llm-hub-workflow-select-file-btn",
     });
 
-    const selectedLabel = selectorContainer.createEl("span", {
+    const selectedLabel = selectorContainer.createSpan({
       text: t("workflowModal.noFileSelected"),
       cls: "llm-hub-workflow-selected-file-label",
     });
@@ -216,8 +216,8 @@ class AnyFilePromptModal extends Modal {
     this.component.load();
 
     // Prevent closing on outside click
-    containerEl.setCssProps({ 'pointer-events': 'none' });
-    modalEl.setCssProps({ 'pointer-events': 'auto' });
+    containerEl.addClass("llm-hub-modal-ignore-outside-click");
+    modalEl.addClass("llm-hub-modal-interactive");
 
     // Title
     contentEl.createEl("h2", { text: this.title || t("workflowModal.selectFile") });
@@ -230,7 +230,7 @@ class AnyFilePromptModal extends Modal {
       cls: "llm-hub-workflow-select-file-btn",
     });
 
-    const selectedLabel = selectorContainer.createEl("span", {
+    const selectedLabel = selectorContainer.createSpan({
       text: t("workflowModal.noFileSelected"),
       cls: "llm-hub-workflow-selected-file-label",
     });
@@ -309,17 +309,17 @@ class AnyFilePromptModal extends Modal {
       img.src = this.app.vault.getResourcePath(file);
     } else if (ext === "pdf") {
       // PDF files: show info
-      this.previewEl.createEl("div", {
+      this.previewEl.createDiv({
         text: `PDF: ${file.basename}.${file.extension}`,
         cls: "llm-hub-workflow-file-preview-pdf",
       });
-      this.previewEl.createEl("div", {
+      this.previewEl.createDiv({
         text: `Size: ${this.formatFileSize(file.stat.size)}`,
       });
     } else {
       // Other files: show basic info
-      this.previewEl.createEl("div", { text: `File: ${file.path}` });
-      this.previewEl.createEl("div", { text: `Size: ${this.formatFileSize(file.stat.size)}` });
+      this.previewEl.createDiv({ text: `File: ${file.path}` });
+      this.previewEl.createDiv({ text: `Size: ${this.formatFileSize(file.stat.size)}` });
     }
   }
 
@@ -378,8 +378,8 @@ class NewFilePathModal extends Modal {
     contentEl.addClass("llm-hub-workflow-file-prompt-modal");
 
     // Prevent closing on outside click
-    containerEl.setCssProps({ 'pointer-events': 'none' });
-    modalEl.setCssProps({ 'pointer-events': 'auto' });
+    containerEl.addClass("llm-hub-modal-ignore-outside-click");
+    modalEl.addClass("llm-hub-modal-interactive");
 
     // Title
     contentEl.createEl("h2", { text: this.title || t("workflowModal.enterFilePath") });
@@ -395,7 +395,7 @@ class NewFilePathModal extends Modal {
 
     // Extension hint
     if (this.extensions && this.extensions.length > 0) {
-      contentEl.createEl("div", {
+      contentEl.createDiv({
         text: t("workflowModal.allowedExtensions", { extensions: this.extensions.join(", ") }),
         cls: "llm-hub-workflow-file-path-hint",
       });

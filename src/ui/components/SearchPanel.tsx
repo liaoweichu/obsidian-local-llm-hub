@@ -10,10 +10,20 @@ import { localLlmChatStream } from "src/core/localLlmProvider";
 import { extractPdfPages } from "src/core/pdfUtils";
 import { parseFilterTerms, matchesFilter, removeRedundantTerms } from "./searchUtils";
 import { t } from "src/i18n";
+import { encodeBase64Utf8 } from "src/utils/base64";
 
 interface SearchPanelProps {
   plugin: LocalLlmHubPlugin;
   onChatWithResults: (attachments: Attachment[]) => void;
+}
+
+interface PluginSettingApi {
+  open?: () => void;
+  openTabById?: (id: string) => void;
+}
+
+interface AppWithPluginSettings {
+  setting?: PluginSettingApi;
 }
 
 export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelProps) {
@@ -408,7 +418,7 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
         name: fileName,
         type: "text",
         mimeType: "text/plain",
-        data: btoa(unescape(encodeURIComponent(content))),
+        data: encodeBase64Utf8(content),
         sourcePath: result.filePath,
       });
     }
@@ -494,8 +504,7 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
   };
 
   const openPluginSettings = () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const setting = (plugin.app as any).setting;
+    const setting = (plugin.app as AppWithPluginSettings).setting;
     setting?.open?.();
     setting?.openTabById?.(plugin.manifest.id);
   };

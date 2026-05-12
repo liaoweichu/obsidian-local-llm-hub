@@ -58,7 +58,7 @@ export const DEFAULT_WORKSPACE_STATE: WorkspaceState = {
   ragSettings: {},
 };
 
-/** @deprecated Use RagSetting instead. Kept for migration from old settings. */
+/** Legacy RAG settings shape kept for migration from old settings. */
 export interface RagConfig {
   enabled: boolean;
   embeddingModel: string;
@@ -227,7 +227,7 @@ export interface LocalLlmHubSettings {
   llmConfig: LocalLlmConfig;
   llmVerified: boolean;
   availableModels: string[];
-  /** @deprecated Kept for migration only. Use WorkspaceState.ragSettings instead. */
+  /** Legacy RAG settings kept for migration only. Use WorkspaceState.ragSettings instead. */
   ragConfig?: RagConfig;
   saveChatHistory: boolean;
   systemPrompt: string;

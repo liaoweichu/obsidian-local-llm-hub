@@ -341,7 +341,7 @@ export class LocalLlmHubPlugin extends Plugin {
   }
 
   async loadSettings(): Promise<void> {
-    const data = await this.loadData();
+    const data = await this.loadData() as Partial<LocalLlmHubSettings> | null;
     this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
     // Ensure nested objects have defaults
     if (!this.settings.encryption) {
@@ -453,7 +453,7 @@ export class LocalLlmHubPlugin extends Plugin {
   }
 
   private updateWorkspaceFolderVisibility(): void {
-    document.body.toggleClass("llm-hub-hide-workspace-folder", this.settings.hideWorkspaceFolder);
+    activeDocument.body.toggleClass("llm-hub-hide-workspace-folder", this.settings.hideWorkspaceFolder);
   }
 
   private async ensureChatViewExists(): Promise<void> {

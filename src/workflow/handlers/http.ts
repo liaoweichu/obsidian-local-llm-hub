@@ -12,12 +12,31 @@ function base64ToUint8Array(base64: string): Uint8Array {
   return bytes;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isStringRecord(value: unknown): value is Record<string, string> {
+  return isRecord(value) && Object.values(value).every((item) => typeof item === "string");
+}
+
+function isFileExplorerData(value: unknown): value is FileExplorerData {
+  return isRecord(value)
+    && typeof value.path === "string"
+    && typeof value.basename === "string"
+    && typeof value.name === "string"
+    && typeof value.extension === "string"
+    && typeof value.mimeType === "string"
+    && typeof value.contentType === "string"
+    && typeof value.data === "string";
+}
+
 // Try to parse FileExplorerData from string
 function tryParseFileExplorerData(value: string): FileExplorerData | null {
   try {
-    const parsed = JSON.parse(value);
-    if (parsed && typeof parsed === "object" && "contentType" in parsed && "data" in parsed && "mimeType" in parsed) {
-      return parsed as FileExplorerData;
+    const parsed = JSON.parse(value) as unknown;
+    if (isFileExplorerData(parsed)) {
+      return parsed;
     }
   } catch {
     // Not JSON or not FileExplorerData
@@ -174,8 +193,10 @@ export async function handleHttpNode(
   if (headersStr) {
     const replacedHeaders = replaceVariables(headersStr, context);
     try {
-      const parsedHeaders = JSON.parse(replacedHeaders);
-      Object.assign(headers, parsedHeaders);
+      const parsedHeaders = JSON.parse(replacedHeaders) as unknown;
+      if (isStringRecord(parsedHeaders)) {
+        Object.assign(headers, parsedHeaders);
+      }
     } catch {
       const lines = replacedHeaders.split("\n");
       for (const line of lines) {
@@ -197,7 +218,10 @@ export async function handleHttpNode(
   if (bodyStr && (method === "POST" || method === "PUT" || method === "PATCH")) {
     if (contentType === "form-data") {
       try {
-        const rawFields = JSON.parse(bodyStr);
+        const rawFields = JSON.parse(bodyStr) as unknown;
+        if (!isRecord(rawFields)) {
+          throw new Error("form-data contentType requires body to be a valid JSON object");
+        }
         const fields: Record<string, string> = {};
         for (const [key, value] of Object.entries(rawFields)) {
           const expandedKey = replaceVariables(key, context);
@@ -218,8 +242,8 @@ export async function handleHttpNode(
     } else if (contentType === "binary") {
       const replacedBody = replaceVariables(bodyStr, context);
       try {
-        const fileData = JSON.parse(replacedBody);
-        if (fileData.data && fileData.contentType === "binary") {
+        const fileData = JSON.parse(replacedBody) as unknown;
+        if (isFileExplorerData(fileData) && fileData.contentType === "binary") {
           const binaryStr = atob(fileData.data);
           const bytes = new Uint8Array(binaryStr.length);
           for (let i = 0; i < binaryStr.length; i++) {
@@ -329,7 +353,7 @@ export async function handleHttpNode(
 
     let responseData: string;
     try {
-      const jsonData = JSON.parse(responseText);
+      const jsonData = JSON.parse(responseText) as unknown;
       responseData = JSON.stringify(jsonData);
     } catch {
       responseData = responseText;

@@ -17,6 +17,11 @@ export interface MermaidRenderOptions {
   useMaxWidth?: boolean;
 }
 
+interface MermaidApi {
+  initialize(config: Record<string, unknown>): void;
+  render(id: string, text: string): Promise<{ svg: string }>;
+}
+
 export function enqueueMermaidRender(
   options: MermaidRenderOptions,
   isCancelled: () => boolean,
@@ -49,7 +54,7 @@ async function doRender(
 
   const id = `mermaid-${Date.now()}-${attempt}`;
   try {
-    const mermaid = await loadMermaid();
+    const mermaid = await loadMermaid() as MermaidApi;
     if (isCancelled()) return null;
 
     mermaid.initialize({
@@ -72,11 +77,11 @@ async function doRender(
     if (isCancelled()) return null;
     return svg;
   } catch (e) {
-    document.getElementById(id)?.remove();
+    activeDocument.getElementById(id)?.remove();
     if (isCancelled()) return null;
 
     if (attempt < 1) {
-      await new Promise((r) => setTimeout(r, 100));
+      await new Promise((r) => activeWindow.setTimeout(r, 100));
       if (isCancelled()) return null;
       return doRender(options, isCancelled, attempt + 1);
     }

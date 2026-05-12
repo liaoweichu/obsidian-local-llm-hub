@@ -10,6 +10,15 @@ import { replaceVariables } from "./utils";
 
 const MAX_TOOL_ROUNDS = 20;
 
+function isFileExplorerData(value: unknown): value is FileExplorerData {
+  return typeof value === "object"
+    && value !== null
+    && typeof (value as Partial<FileExplorerData>).basename === "string"
+    && typeof (value as Partial<FileExplorerData>).mimeType === "string"
+    && typeof (value as Partial<FileExplorerData>).contentType === "string"
+    && typeof (value as Partial<FileExplorerData>).data === "string";
+}
+
 // Result type for command node execution
 export interface CommandNodeResult {
   usedModel: string;
@@ -61,8 +70,8 @@ Please revise the output based on the user's feedback above.`;
       const varValue = context.variables.get(varName);
       if (varValue && typeof varValue === "string") {
         try {
-          const fileData: FileExplorerData = JSON.parse(varValue);
-          if (fileData.contentType === "binary" && fileData.data) {
+          const fileData = JSON.parse(varValue) as unknown;
+          if (isFileExplorerData(fileData) && fileData.contentType === "binary") {
             let attachmentType: "image" | "pdf" | "text" | "audio" | "video" = "text";
             if (fileData.mimeType.startsWith("image/")) {
               attachmentType = "image";

@@ -60,8 +60,8 @@ export class DialogPromptModal extends Modal {
     contentEl.addClass("llm-hub-workflow-dialog-modal");
 
     // Prevent closing on outside click
-    containerEl.setCssProps({ 'pointer-events': 'none' });
-    modalEl.setCssProps({ 'pointer-events': 'auto' });
+    containerEl.addClass("llm-hub-modal-ignore-outside-click");
+    modalEl.addClass("llm-hub-modal-interactive");
 
     // Title
     contentEl.createEl("h2", { text: this.title });

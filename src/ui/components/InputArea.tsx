@@ -125,8 +125,8 @@ const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(function InputArea
         setShowVaultToolMenu(false);
       }
     };
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
+    activeDocument.addEventListener("mousedown", handleClick);
+    return () => activeDocument.removeEventListener("mousedown", handleClick);
   }, [showVaultToolMenu]);
 
   useImperativeHandle(ref, () => ({
@@ -241,7 +241,7 @@ const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(function InputArea
     const newInput = before + mention.value + " " + after;
     setInput(newInput);
     setShowMentionAutocomplete(false);
-    setTimeout(() => {
+    activeWindow.setTimeout(() => {
       const newPos = mentionStartPos + mention.value.length + 1;
       textareaRef.current?.setSelectionRange(newPos, newPos);
       textareaRef.current?.focus();
@@ -268,7 +268,7 @@ const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(function InputArea
     if (cmd.vaultToolMode !== null && cmd.vaultToolMode !== undefined) {
       onVaultToolModeChange(cmd.vaultToolMode);
     }
-    setTimeout(() => {
+    activeWindow.setTimeout(() => {
       textareaRef.current?.focus();
     }, 0);
   };
