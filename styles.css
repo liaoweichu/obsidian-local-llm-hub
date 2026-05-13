@@ -6220,6 +6220,7 @@ body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) 
   padding: 6px 14px;
   font-size: 13px;
   border-radius: 4px;
+}
 
 /* Label used above the diff in the workflow confirm modal */
 .llm-hub-edit-confirm-preview-label {

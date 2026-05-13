@@ -241,7 +241,7 @@ const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(function InputArea
     const newInput = before + mention.value + " " + after;
     setInput(newInput);
     setShowMentionAutocomplete(false);
-    activeWindow.setTimeout(() => {
+    window.setTimeout(() => {
       const newPos = mentionStartPos + mention.value.length + 1;
       textareaRef.current?.setSelectionRange(newPos, newPos);
       textareaRef.current?.focus();
@@ -268,7 +268,7 @@ const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(function InputArea
     if (cmd.vaultToolMode !== null && cmd.vaultToolMode !== undefined) {
       onVaultToolModeChange(cmd.vaultToolMode);
     }
-    activeWindow.setTimeout(() => {
+    window.setTimeout(() => {
       textareaRef.current?.focus();
     }, 0);
   };

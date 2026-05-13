@@ -80,7 +80,7 @@ export function executeSandboxedJS(
     let settled = false;
 
     const cleanup = (timer: number) => {
-      activeWindow.clearTimeout(timer);
+      window.clearTimeout(timer);
       activeWindow.removeEventListener("message", handler);
       if (iframe.parentNode) {
         iframe.parentNode.removeChild(iframe);
@@ -114,7 +114,7 @@ export function executeSandboxedJS(
 
     activeWindow.addEventListener("message", handler);
 
-    const timer = activeWindow.setTimeout(() => {
+    const timer = window.setTimeout(() => {
       if (!settled) {
         settled = true;
         cleanup(timer);

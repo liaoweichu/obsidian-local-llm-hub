@@ -60,7 +60,7 @@ export class EncryptionManager {
     try {
       const content = await this.app.vault.read(file);
       if (isEncryptedFile(content)) {
-        activeWindow.setTimeout(() => {
+        window.setTimeout(() => {
           void this.openCryptView(file);
         }, 50);
       }

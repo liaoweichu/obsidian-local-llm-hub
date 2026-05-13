@@ -625,9 +625,9 @@ export class AIWorkflowModal extends Modal {
 
     // Focus appropriate field
     if (this.mode === "create") {
-      activeWindow.setTimeout(() => this.nameInputEl?.focus(), 50);
+      window.setTimeout(() => this.nameInputEl?.focus(), 50);
     } else {
-      activeWindow.setTimeout(() => this.descriptionEl?.focus(), 50);
+      window.setTimeout(() => this.descriptionEl?.focus(), 50);
     }
   }
 
@@ -738,7 +738,7 @@ export class AIWorkflowModal extends Modal {
     // Show paste response section, scroll it into view, and focus the textarea
     this.pasteSectionEl?.removeClass("is-hidden");
     this.pasteSectionEl?.scrollIntoView({ behavior: "smooth", block: "end" });
-    activeWindow.setTimeout(() => this.pasteTextareaEl?.focus(), 100);
+    window.setTimeout(() => this.pasteTextareaEl?.focus(), 100);
 
     new Notice(t("aiWorkflow.promptCopied"));
   }

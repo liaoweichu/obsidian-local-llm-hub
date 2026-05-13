@@ -442,7 +442,7 @@ function displaySelectedRagSetting(
             }));
             progressText.setText(`${t("common.error")}: ${err instanceof Error ? err.message : String(err)}`);
             progressText.addClass("llm-hub-settings-sync-progress-error");
-            activeWindow.setTimeout(() => progressContainer.addClass("llm-hub-hidden"), 2000);
+            window.setTimeout(() => progressContainer.addClass("llm-hub-hidden"), 2000);
           } finally {
             btn.setButtonText(t("settings.ragSync"));
             btn.setDisabled(false);

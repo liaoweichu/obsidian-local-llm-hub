@@ -48,7 +48,7 @@ export default function SkillSelector({
       }
     };
     activeDocument.addEventListener("mousedown", handleClick);
-    requestAnimationFrame(updatePosition);
+    window.requestAnimationFrame(updatePosition);
     window.addEventListener("resize", updatePosition);
     return () => {
       activeDocument.removeEventListener("mousedown", handleClick);

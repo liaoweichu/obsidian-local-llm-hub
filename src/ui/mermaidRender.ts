@@ -81,7 +81,7 @@ async function doRender(
     if (isCancelled()) return null;
 
     if (attempt < 1) {
-      await new Promise((r) => activeWindow.setTimeout(r, 100));
+      await new Promise((r) => window.setTimeout(r, 100));
       if (isCancelled()) return null;
       return doRender(options, isCancelled, attempt + 1);
     }

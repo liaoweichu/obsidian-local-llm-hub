@@ -260,9 +260,9 @@ const Chat = forwardRef<ChatRef, ChatProps>(({ plugin }, ref) => {
       const sel = plugin.getSelection();
       setHasSelection(!!sel);
     };
-    const interval = activeWindow.setInterval(checkSelection, 2000);
+    const interval = window.setInterval(checkSelection, 2000);
     checkSelection();
-    return () => activeWindow.clearInterval(interval);
+    return () => window.clearInterval(interval);
   }, [plugin]);
 
   const refreshVaultFiles = useCallback(() => {
@@ -391,7 +391,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({ plugin }, ref) => {
       await plugin.app.vault.create(fileName, markdown);
       new Notice(t("chat.savedAsNote", { path: fileName }));
       setSaveNoteState("saved");
-      activeWindow.setTimeout(() => setSaveNoteState("idle"), 3000);
+      window.setTimeout(() => setSaveNoteState("idle"), 3000);
     } catch (error) {
       new Notice(t("common.error") + formatError(error));
       setSaveNoteState("idle");

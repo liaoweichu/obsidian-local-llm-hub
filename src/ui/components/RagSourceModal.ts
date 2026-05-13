@@ -67,7 +67,7 @@ export class RagSourceModal extends Modal {
       this.close();
     });
 
-    activeWindow.setTimeout(() => textarea.focus(), 50);
+    window.setTimeout(() => textarea.focus(), 50);
   }
 
   onClose() {

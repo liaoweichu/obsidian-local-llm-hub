@@ -125,7 +125,7 @@ export class RagChunkEditModal extends Modal {
       this.close();
     });
 
-    activeWindow.setTimeout(() => this.textarea?.focus(), 50);
+    window.setTimeout(() => this.textarea?.focus(), 50);
   }
 
   onClose() {

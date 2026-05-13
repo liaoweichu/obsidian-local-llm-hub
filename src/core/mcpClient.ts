@@ -125,13 +125,13 @@ export class McpClient {
 
     if (proc && !proc.killed) {
       await new Promise<void>((resolve) => {
-        const timer = activeWindow.setTimeout(() => {
+        const timer = window.setTimeout(() => {
           if (!proc.killed) {
             proc.kill("SIGKILL");
           }
         }, 3000);
         proc.on("close", () => {
-          activeWindow.clearTimeout(timer);
+          window.clearTimeout(timer);
           resolve();
         });
         proc.kill("SIGTERM");
@@ -252,7 +252,7 @@ export class McpClient {
       };
 
       const timeoutMs = method === "initialize" ? 120000 : 30000;
-      const timeout = activeWindow.setTimeout(() => {
+      const timeout = window.setTimeout(() => {
         if (this.pending.has(id)) {
           this.pending.delete(id);
           reject(new Error(`MCP request timed out: ${method}`));
@@ -261,11 +261,11 @@ export class McpClient {
 
       this.pending.set(id, {
         resolve: (value) => {
-          activeWindow.clearTimeout(timeout);
+          window.clearTimeout(timeout);
           resolve(value);
         },
         reject: (reason) => {
-          activeWindow.clearTimeout(timeout);
+          window.clearTimeout(timeout);
           reject(reason);
         },
       });

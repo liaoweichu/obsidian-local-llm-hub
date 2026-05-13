@@ -72,7 +72,7 @@ class CopyInputModal extends Modal {
       }
     });
 
-    activeWindow.setTimeout(() => {
+    window.setTimeout(() => {
       this.inputEl?.focus();
     }, 50);
   }

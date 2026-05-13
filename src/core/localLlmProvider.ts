@@ -787,10 +787,10 @@ class StreamSignal {
   async wait(timeoutMs: number): Promise<boolean> {
     const vBefore = this.version;
     return new Promise<boolean>((res) => {
-      const timer = activeWindow.setTimeout(() => { this.resolve = null; res(false); }, timeoutMs);
-      this.resolve = () => { activeWindow.clearTimeout(timer); this.resolve = null; res(true); };
+      const timer = window.setTimeout(() => { this.resolve = null; res(false); }, timeoutMs);
+      this.resolve = () => { window.clearTimeout(timer); this.resolve = null; res(true); };
       // Double-check after setting resolve (covers notify() called between vBefore read and here)
-      if (this.version !== vBefore) { activeWindow.clearTimeout(timer); this.resolve = null; res(true); }
+      if (this.version !== vBefore) { window.clearTimeout(timer); this.resolve = null; res(true); }
     });
   }
 }

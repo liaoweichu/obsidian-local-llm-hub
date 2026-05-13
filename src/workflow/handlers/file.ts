@@ -226,7 +226,9 @@ export async function handleFileSaveNode(
 
   if (fileData.contentType === "binary") {
     const binaryData = base64ToUint8Array(fileData.data);
-    const arrayBuffer = binaryData.buffer.slice(binaryData.byteOffset, binaryData.byteOffset + binaryData.byteLength) as ArrayBuffer;
+    const bytes = new Uint8Array(binaryData.byteLength);
+    bytes.set(binaryData);
+    const arrayBuffer = bytes.buffer;
 
     if (existingFile && existingFile instanceof TFile) {
       await app.vault.modifyBinary(existingFile, arrayBuffer);

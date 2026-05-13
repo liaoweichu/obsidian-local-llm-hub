@@ -110,7 +110,7 @@ export class HistoryModal extends Modal {
     unlockBtn.addEventListener("click", () => void handleUnlock());
 
     // Focus input
-    activeWindow.setTimeout(() => input.focus(), 50);
+    window.setTimeout(() => input.focus(), 50);
   }
 
   private renderHistoryUI(contentEl: HTMLElement): void {

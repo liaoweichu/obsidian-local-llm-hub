@@ -201,7 +201,7 @@ export async function handleObsidianCommandNode(
       await newLeaf.openFile(file);
       app.workspace.setActiveLeaf(newLeaf, { focus: true });
     }
-    await new Promise(resolve => activeWindow.setTimeout(resolve, 100));
+    await new Promise(resolve => window.setTimeout(resolve, 100));
   }
 
   await (app as unknown as { commands: { executeCommandById: (id: string) => Promise<void> } }).commands.executeCommandById(commandId);

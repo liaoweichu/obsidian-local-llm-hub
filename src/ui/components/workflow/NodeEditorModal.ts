@@ -626,7 +626,7 @@ export class NodeEditorModal extends Modal {
 
     inputEl.addEventListener("blur", () => {
       // Delay to allow click events on suggestions
-      activeWindow.setTimeout(() => hideSuggestions(), 200);
+      window.setTimeout(() => hideSuggestions(), 200);
     });
   }
 

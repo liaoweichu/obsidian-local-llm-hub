@@ -90,11 +90,9 @@ export async function saveRagIndex(
   await app.vault.adapter.write(indexPath, JSON.stringify(index));
 
   const vectorsPath = getVectorsPath(settingName);
-  const buffer = vectors.buffer.slice(
-    vectors.byteOffset,
-    vectors.byteOffset + vectors.byteLength,
-  );
-  await app.vault.adapter.writeBinary(vectorsPath, buffer as ArrayBuffer);
+  const bytes = new Uint8Array(vectors.byteLength);
+  bytes.set(new Uint8Array(vectors.buffer, vectors.byteOffset, vectors.byteLength));
+  await app.vault.adapter.writeBinary(vectorsPath, bytes.buffer);
 }
 
 /**
