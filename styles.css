@@ -7,30 +7,27 @@
 }
 
 .llm-hub-workflow-mermaid svg {
-  max-width: none !important;
+  max-width: none;
 }
 
 /* Wrap long text inside node labels instead of clipping */
 .llm-hub-workflow-mermaid .nodeLabel {
-  white-space: normal !important;
-  word-break: break-word !important;
+  white-space: normal;
+  word-break: break-word;
   max-width: 300px;
-  text-align: left !important;
+  text-align: left;
 }
 
 /* Hide workspace folder in file explorer */
-body.llm-hub-hide-workspace-folder .nav-folder[data-path="LocalLlmHub"],
-body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) {
-  display: none !important;
+body.llm-hub-hide-workspace-folder .nav-folder[data-path="LocalLlmHub"] {
+  display: none;
 }
 
 /* Folder icons in file explorer */
-.nav-folder[data-path="skills"] > .nav-folder-title > .nav-folder-title-content::before,
-.nav-folder:has(> [data-path="skills"]) > .nav-folder-title > .nav-folder-title-content::before {
+.nav-folder[data-path="skills"] > .nav-folder-title > .nav-folder-title-content::before {
   content: "\01F9E9 ";
 }
-.nav-folder[data-path="workflows"] > .nav-folder-title > .nav-folder-title-content::before,
-.nav-folder:has(> [data-path="workflows"]) > .nav-folder-title > .nav-folder-title-content::before {
+.nav-folder[data-path="workflows"] > .nav-folder-title > .nav-folder-title-content::before {
   content: "\26A1 ";
 }
 
@@ -266,8 +263,8 @@ body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) 
   margin-bottom: 12px;
   padding: 8px 12px;
   border-radius: 8px;
-  user-select: text !important;
-  -webkit-user-select: text !important;
+  user-select: text;
+  -webkit-user-select: text;
   cursor: text;
 }
 
@@ -617,7 +614,7 @@ body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) 
 }
 
 .llm-hub-hidden-input {
-  display: none !important;
+  display: none;
 }
 
 .llm-hub-input {
@@ -724,7 +721,7 @@ body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) 
 }
 
 .llm-hub-wide-input {
-  width: 100% !important;
+  width: 100%;
   min-width: 200px;
 }
 
@@ -753,7 +750,7 @@ body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) 
   display: flex;
   gap: 8px;
   justify-content: flex-end;
-  margin-top: 16px;
+  margin-top: 12px;
 }
 
 /* ── Password Prompt ──────────────────────────────── */
@@ -1179,7 +1176,7 @@ body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) 
 }
 
 .llm-hub-settings-textarea {
-  width: 100% !important;
+  width: 100%;
   min-width: 200px;
 }
 
@@ -1236,9 +1233,6 @@ body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) 
   border-radius: 4px;
   cursor: pointer;
   white-space: nowrap;
-}
-
-.llm-hub-workflow-sidebar-add-btn {
   background: var(--background-secondary);
   border: 1px solid var(--background-modifier-border);
   color: var(--text-normal);
@@ -2169,12 +2163,6 @@ body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) 
   flex-wrap: wrap;
 }
 
-/* Mobile Styles for Workflow */
-.is-mobile .llm-hub-tab {
-  padding: 12px 16px;
-  font-size: 14px;
-}
-
 /* Workflow Prompt Modals */
 .llm-hub-modal-ignore-outside-click {
   pointer-events: none;
@@ -2307,6 +2295,7 @@ body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) 
 .llm-hub-workflow-confirm-modal {
   width: 600px;
   height: 500px;
+  min-width: 700px;
   max-width: 90vw;
   max-height: 80vh;
 }
@@ -2393,11 +2382,6 @@ body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) 
   font-size: 13px;
   border-radius: 4px;
   cursor: pointer;
-}
-
-/* Utility classes */
-.llm-hub-hidden {
-  display: none;
 }
 
 /* Edit Confirmation Additional Request */
@@ -2739,7 +2723,6 @@ body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) 
 
 .llm-hub-workflow-attach-btn:hover {
   background: var(--background-modifier-active);
-  background: var(--background-modifier-active);
 }
 
 .llm-hub-workflow-attachments {
@@ -2772,7 +2755,6 @@ body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) 
 /* AI Workflow modal drag handle */
 .llm-hub-workflow-modal .modal-drag-handle {
   cursor: move;
-  padding: 8px 0;
   margin: -16px -16px 16px -16px;
   padding: 16px;
   border-bottom: 1px solid var(--background-modifier-border);
@@ -2916,12 +2898,6 @@ body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) 
 
 .llm-hub-workflow-execution-history-info.is-hidden {
   display: none;
-}
-
-/* AI Workflow confirmation modal */
-.llm-hub-workflow-confirm-modal {
-  min-width: 700px;
-  max-width: 90vw;
 }
 
 .llm-hub-workflow-modal-resizable.modal {
@@ -3243,7 +3219,6 @@ body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) 
 
 .llm-hub-workflow-generation-modal-content .modal-drag-handle {
   cursor: move;
-  padding: 8px 0;
   margin: -16px -16px 16px -16px;
   padding: 16px;
   border-bottom: 1px solid var(--background-modifier-border);
@@ -3381,6 +3356,7 @@ body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) 
   justify-content: flex-end;
   gap: 8px;
 }
+/* ===============================================
    Workflow Preview Modal Styles
    =============================================== */
 
@@ -3391,7 +3367,6 @@ body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) 
 
 .llm-hub-workflow-preview-modal-content .modal-drag-handle {
   cursor: move;
-  padding: 8px 0;
   margin: -16px -16px 16px -16px;
   padding: 16px;
   border-bottom: 1px solid var(--background-modifier-border);
@@ -3544,18 +3519,18 @@ body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) 
 /* Mobile: Full screen modals */
 .is-mobile .llm-hub-workflow-generation-modal,
 .is-mobile .llm-hub-workflow-preview-modal {
-  position: fixed !important;
-  top: 0 !important;
-  left: 0 !important;
-  right: 0 !important;
-  bottom: 0 !important;
-  width: 100vw !important;
-  max-width: 100vw !important;
-  height: 100vh !important;
-  max-height: 100vh !important;
-  margin: 0 !important;
-  border-radius: 0 !important;
-  transform: none !important;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100vw;
+  max-width: 100vw;
+  height: 100vh;
+  max-height: 100vh;
+  margin: 0;
+  border-radius: 0;
+  transform: none;
 }
 
 .is-mobile .llm-hub-workflow-generation-modal-content,
@@ -3649,7 +3624,7 @@ body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) 
 
 /* Reduce content height when textarea is focused on mobile */
 .is-mobile .llm-hub-workflow-preview-modal-content.textarea-focused .modal-drag-handle {
-  display: none !important;
+  display: none;
 }
 
 .is-mobile .llm-hub-workflow-preview-modal-content.textarea-focused .llm-hub-workflow-preview-name {
@@ -3665,7 +3640,7 @@ body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) 
 }
 
 .is-mobile .llm-hub-workflow-preview-modal-content.textarea-focused .llm-hub-workflow-preview-yaml-section {
-  display: none !important;
+  display: none;
 }
 
 .is-mobile .llm-hub-workflow-preview-modal-content.textarea-focused {
@@ -3735,6 +3710,7 @@ body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) 
   display: none;
 }
 
+/* ===============================================
    Execution History Select Modal Styles
    =============================================== */
 
@@ -4032,6 +4008,7 @@ body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) 
   width: 100%;
   padding: 12px;
 }
+/* ===============================================
    Workflow Execution Modal Styles
    =============================================== */
 
@@ -4285,18 +4262,18 @@ body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) 
 
 /* Mobile styles */
 .is-mobile .llm-hub-workflow-execution-modal {
-  position: fixed !important;
-  top: 0 !important;
-  left: 0 !important;
-  right: 0 !important;
-  bottom: 0 !important;
-  width: 100vw !important;
-  max-width: 100vw !important;
-  height: 100vh !important;
-  max-height: 100vh !important;
-  margin: 0 !important;
-  border-radius: 0 !important;
-  transform: none !important;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100vw;
+  max-width: 100vw;
+  height: 100vh;
+  max-height: 100vh;
+  margin: 0;
+  border-radius: 0;
+  transform: none;
 }
 
 .is-mobile .llm-hub-workflow-execution-modal-content {
@@ -4734,10 +4711,6 @@ body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) 
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.llm-hub-hidden {
-  display: none;
 }
 
 .llm-hub-settings-sync-progress {
@@ -5225,17 +5198,6 @@ body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) 
   cursor: not-allowed;
 }
 
-.llm-hub-modal-actions {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-  margin-top: 12px;
-}
-
-.llm-hub-hidden {
-  display: none !important;
-}
-
 /* ===== RAG Text Modal ===== */
 
 .llm-hub-rag-text-modal.modal {
@@ -5342,16 +5304,15 @@ body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) 
 
 /* Thinking content in the generation modal — bounded height so the buttons
    below stay visible, and overflow-y:auto so users can scroll through the
-   streamed text. Using explicit vh max-height + !important because flex-based
-   sizing failed to produce a scrollbar in practice. */
+   streamed text. */
 .llm-hub-workflow-generation-modal-content .llm-hub-workflow-generation-thinking-details[open] .llm-hub-thinking-content {
-  max-height: 50vh !important;
-  overflow-y: auto !important;
+  max-height: 50vh;
+  overflow-y: auto;
 }
 
 /* Outside the generating phase, tighten the cap so plan/review stays visible. */
 .llm-hub-workflow-generation-modal-content:not([data-phase="generating"]) .llm-hub-workflow-generation-thinking-details[open] .llm-hub-thinking-content {
-  max-height: 25vh !important;
+  max-height: 25vh;
 }
 
 /* Review section grows when visible */
@@ -5857,8 +5818,7 @@ body.llm-hub-hide-workspace-folder .nav-folder:has(> [data-path="LocalLlmHub"]) 
 
 .llm-hub-skill-chip-name.llm-hub-tool-clickable {
   cursor: pointer;
-  text-decoration: underline dotted;
-  text-underline-offset: 2px;
+  border-bottom: 1px dotted currentColor;
 }
 
 .llm-hub-skill-chip-name.llm-hub-tool-clickable:hover {
