@@ -308,11 +308,11 @@ function createCommentEditor(
   const line = diffLines[lineIndex];
   const existingComment = lineComments.get(lineIndex);
 
-  const editor = activeDocument.createDiv();
+  const editor = activeDocument.createElement("div");
   editor.className = "llm-hub-diff-comment-editor";
   afterEl.insertAdjacentElement("afterend", editor);
 
-  const textarea = activeDocument.createEl("textarea");
+  const textarea = activeDocument.createElement("textarea");
   textarea.className = "llm-hub-diff-comment-input";
   textarea.placeholder = t("diff.commentPlaceholder");
   textarea.rows = 2;
@@ -323,11 +323,11 @@ function createCommentEditor(
   editor.addEventListener("click", (e) => e.stopPropagation());
   editor.appendChild(textarea);
 
-  const actions = activeDocument.createDiv();
+  const actions = activeDocument.createElement("div");
   actions.className = "llm-hub-diff-comment-actions";
   editor.appendChild(actions);
 
-  const saveBtn = activeDocument.createEl("button");
+  const saveBtn = activeDocument.createElement("button");
   saveBtn.textContent = t("diff.saveComment");
   saveBtn.className = "mod-cta";
   saveBtn.addEventListener("click", (e) => {
@@ -350,7 +350,7 @@ function createCommentEditor(
   });
   actions.appendChild(saveBtn);
 
-  const cancelBtn = activeDocument.createEl("button");
+  const cancelBtn = activeDocument.createElement("button");
   cancelBtn.textContent = t("diff.cancelComment");
   cancelBtn.addEventListener("click", (e) => {
     e.stopPropagation();
@@ -359,7 +359,7 @@ function createCommentEditor(
   actions.appendChild(cancelBtn);
 
   if (existingComment) {
-    const removeBtn = activeDocument.createEl("button");
+    const removeBtn = activeDocument.createElement("button");
     removeBtn.textContent = t("diff.removeComment");
     removeBtn.className = "mod-warning";
     removeBtn.addEventListener("click", (e) => {

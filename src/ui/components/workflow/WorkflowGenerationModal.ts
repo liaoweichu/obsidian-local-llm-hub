@@ -248,7 +248,7 @@ export class WorkflowGenerationModal extends Modal {
       this.thinkingSectionEl.removeClass("is-hidden");
     }
     if (this.pendingThinkingSeparator && this.thinkingContainerEl) {
-      const sep = activeDocument.createDiv();
+      const sep = activeDocument.createElement("div");
       sep.className = "llm-hub-workflow-generation-thinking-separator";
       sep.textContent = `── ${this.pendingThinkingSeparator} ──`;
       this.thinkingContainerEl.appendChild(sep);
@@ -256,7 +256,7 @@ export class WorkflowGenerationModal extends Modal {
     }
     this.thinkingText += content;
     if (this.thinkingContainerEl) {
-      const span = activeDocument.createSpan();
+      const span = activeDocument.createElement("span");
       span.textContent = content;
       this.thinkingContainerEl.appendChild(span);
       this.thinkingContainerEl.scrollTop = this.thinkingContainerEl.scrollHeight;
@@ -273,7 +273,7 @@ export class WorkflowGenerationModal extends Modal {
   appendPlan(content: string): void {
     this.planText += content;
     if (this.planContainerEl) {
-      const span = activeDocument.createSpan();
+      const span = activeDocument.createElement("span");
       span.textContent = content;
       this.planContainerEl.appendChild(span);
       this.planContainerEl.scrollTop = this.planContainerEl.scrollHeight;
@@ -283,7 +283,7 @@ export class WorkflowGenerationModal extends Modal {
   appendReview(content: string): void {
     this.reviewText += content;
     if (this.reviewContainerEl) {
-      const span = activeDocument.createSpan();
+      const span = activeDocument.createElement("span");
       span.textContent = content;
       this.reviewContainerEl.appendChild(span);
       this.reviewContainerEl.scrollTop = this.reviewContainerEl.scrollHeight;

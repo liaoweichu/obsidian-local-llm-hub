@@ -289,7 +289,7 @@ export class EditConfirmationModal extends Modal {
   private addResizeHandles(modalEl: HTMLElement) {
     const directions = ["n", "e", "s", "w", "ne", "nw", "se", "sw"];
     for (const dir of directions) {
-      const handle = activeDocument.createDiv();
+      const handle = activeDocument.createElement("div");
       handle.className = `llm-hub-workflow-confirm-resize-handle llm-hub-workflow-confirm-resize-${dir}`;
       handle.dataset.direction = dir;
       modalEl.appendChild(handle);
