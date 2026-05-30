@@ -117,6 +117,7 @@ export const ja: Record<string, string> = {
   "settings.ragSyncingEmbeddings": "埋め込み生成中",
   "settings.ragSyncSaving": "インデックスを保存中...",
   "settings.ragSynced": "{{files}}ファイルから{{count}}チャンクを同期しました",
+  "settings.ragSyncPdfFailed": "抽出できないPDF {{count}}件をスキップしました:\n{{files}}",
   "settings.ragSyncFailed": "同期失敗: {{error}}",
   "settings.syncCancelled": "同期がキャンセルされました",
   "settings.cancelSync": "キャンセル",

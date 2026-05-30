@@ -22,10 +22,14 @@ import {
 const EMBEDDING_FORMAT_VERSION = 2;
 const DEFAULT_EMBEDDING_BATCH_SIZE = 32;
 const OLLAMA_EMBEDDING_BATCH_SIZE = 4;
+const MAX_CHANGED_FILES_PER_SYNC = 50;
+const SCAN_YIELD_INTERVAL = 25;
 
 export interface SyncResult {
   totalChunks: number;
   indexedFiles: number;
+  deferredFiles?: number;
+  failedFiles?: string[];
 }
 
 export interface RagSyncProgress {
@@ -75,6 +79,10 @@ function getEmbeddingBatchSize(ragSetting: RagSetting, llmConfig: LocalLlmConfig
   return llmConfig.framework === "ollama" || isOllamaDefaultUrl(embeddingBaseUrl)
     ? OLLAMA_EMBEDDING_BATCH_SIZE
     : DEFAULT_EMBEDDING_BATCH_SIZE;
+}
+
+async function yieldToEventLoop(): Promise<void> {
+  await new Promise<void>(resolve => setTimeout(resolve, 0));
 }
 
 interface StoreEntry {
@@ -248,8 +256,8 @@ class RagStore {
     const newChecksums: Record<string, string> = {};
     const fileContents = new Map<string, string>();
     const pdfInfoMap = new Map<string, PdfExtractResult>();
-    const pdfExtractFailed = new Set<string>();
     const migratedPdfChecksums = new Set<string>();
+    const failedFiles: string[] = [];
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
@@ -266,50 +274,80 @@ class RagStore {
         if (checksum === oldChecksums[file.path]) {
           continue;
         }
-
-        let result: PdfExtractResult | null;
-        try {
-          result = await extractPdfText(app, file);
-        } catch (err) {
-          // Extraction failed — mark for preserving old chunks later
-          console.warn(`Local LLM Hub: PDF extraction failed for ${file.path}:`, err);
-          delete newChecksums[file.path];
-          pdfExtractFailed.add(file.path);
-          continue;
-        }
-        if (!result) {
-          delete newChecksums[file.path];
-          continue; // skip PDFs with no extractable text
-        }
-        if (oldChecksums[file.path] && simpleChecksum(result.text) === oldChecksums[file.path]) {
-          migratedPdfChecksums.add(file.path);
-          continue;
-        }
-        fileContents.set(file.path, result.text);
-        pdfInfoMap.set(file.path, result);
       } else {
         const content = await app.vault.cachedRead(file);
         const checksum = simpleChecksum(content);
         newChecksums[file.path] = checksum;
-        fileContents.set(file.path, content);
+      }
+      if ((i + 1) % SCAN_YIELD_INTERVAL === 0) {
+        await yieldToEventLoop();
       }
     }
 
     // Find files that changed
-    const changedFiles: string[] = [];
+    let changedFiles: string[] = [];
+    for (const [filePath, checksum] of Object.entries(newChecksums)) {
+      if (checksum !== oldChecksums[filePath]) {
+        changedFiles.push(filePath);
+      }
+    }
+
+    // Cap each sync pass so large first-time vaults can make progress without
+    // keeping every extracted document and embedding in memory at once.
+    const deferredFiles = changedFiles.slice(MAX_CHANGED_FILES_PER_SYNC);
+    changedFiles = changedFiles.slice(0, MAX_CHANGED_FILES_PER_SYNC);
+    for (const deferredPath of deferredFiles) {
+      fileContents.delete(deferredPath);
+      if (oldChecksums[deferredPath]) {
+        newChecksums[deferredPath] = oldChecksums[deferredPath];
+      } else {
+        delete newChecksums[deferredPath];
+      }
+    }
+
+    for (const filePath of changedFiles) {
+      const file = app.vault.getAbstractFileByPath(filePath);
+      if (!(file instanceof TFile)) {
+        delete newChecksums[filePath];
+        continue;
+      }
+
+      if (file.extension !== "pdf") {
+        fileContents.set(filePath, await app.vault.cachedRead(file));
+        if (fileContents.size % SCAN_YIELD_INTERVAL === 0) {
+          await yieldToEventLoop();
+        }
+        continue;
+      }
+
+      let result: PdfExtractResult | null;
+      try {
+        result = await extractPdfText(app, file);
+      } catch (err) {
+        // Extraction failed — keep the checksum so the same unreadable PDF does not block later syncs.
+        console.warn(`Local LLM Hub: PDF extraction failed for ${filePath}:`, err);
+        failedFiles.push(filePath);
+        continue;
+      }
+      if (!result) {
+        failedFiles.push(filePath);
+        continue; // skip PDFs with no extractable text
+      }
+      if (oldChecksums[filePath] && simpleChecksum(result.text) === oldChecksums[filePath]) {
+        migratedPdfChecksums.add(filePath);
+        continue;
+      }
+      fileContents.set(filePath, result.text);
+      pdfInfoMap.set(filePath, result);
+      await yieldToEventLoop();
+    }
+
     const unchangedChunks: { meta: ChunkMeta[]; vectors: number[][] } = {
       meta: [],
       vectors: [],
     };
 
-    // Preserve old checksums for PDFs that failed extraction
-    for (const failedPath of pdfExtractFailed) {
-      if (oldChecksums[failedPath]) {
-        newChecksums[failedPath] = oldChecksums[failedPath];
-      }
-    }
-
-    // Keep chunks from unchanged files (includes failed-extraction PDFs with preserved checksums)
+    // Keep chunks from unchanged, deferred, migrated, and failed-extraction files.
     if (index && vectors) {
       for (let i = 0; i < index.meta.length; i++) {
         const chunk = index.meta[i];
@@ -319,14 +357,6 @@ class RagStore {
           const vec = Array.from(vectors.slice(i * dim, (i + 1) * dim));
           unchangedChunks.vectors.push(vec);
         }
-      }
-    }
-
-    // Find changed or new files
-    for (const [filePath, checksum] of Object.entries(newChecksums)) {
-      if (migratedPdfChecksums.has(filePath)) continue;
-      if (checksum !== oldChecksums[filePath]) {
-        changedFiles.push(filePath);
       }
     }
 
@@ -438,6 +468,8 @@ class RagStore {
     return {
       totalChunks: allMeta.length,
       indexedFiles: Object.keys(newChecksums).length,
+      deferredFiles: deferredFiles.length,
+      failedFiles,
     };
   }
 
@@ -654,6 +686,9 @@ class RagStore {
     const entry = await this.ensureLoaded(app, settingName);
     if (!entry.index) return [];
     const counts = new Map<string, number>();
+    for (const filePath of Object.keys(entry.index.fileChecksums ?? {})) {
+      counts.set(filePath, 0);
+    }
     for (const m of entry.index.meta) {
       counts.set(m.filePath, (counts.get(m.filePath) ?? 0) + 1);
     }

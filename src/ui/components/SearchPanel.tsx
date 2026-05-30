@@ -231,29 +231,50 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
 
     try {
       const store = getRagStore();
-      const result = await store.sync(
+      const failedPdfFiles = new Set<string>();
+      const handleProgress = (progress: RagSyncProgress) => {
+        if (ragSyncCancelRef.current) {
+          abortController.abort();
+          throw new Error("Sync aborted");
+        }
+        setRagSyncProgress(progress);
+      };
+      let result = await store.sync(
         plugin.app,
         selectedRagSetting,
         ragSetting,
         plugin.settings.llmConfig,
         abortController.signal,
-        (progress) => {
-          if (ragSyncCancelRef.current) {
-            throw new Error("Sync aborted");
-          }
-          setRagSyncProgress(progress);
-        },
+        handleProgress,
       );
+      result.failedFiles?.forEach(filePath => failedPdfFiles.add(filePath));
+      while (result.deferredFiles && !ragSyncCancelRef.current) {
+        result = await store.sync(
+          plugin.app,
+          selectedRagSetting,
+          ragSetting,
+          plugin.settings.llmConfig,
+          abortController.signal,
+          handleProgress,
+        );
+        result.failedFiles?.forEach(filePath => failedPdfFiles.add(filePath));
+      }
       if (!ragSyncCancelRef.current) {
         new Notice(t("settings.ragSynced", {
           count: String(result.totalChunks),
           files: String(result.indexedFiles),
         }));
+        if (failedPdfFiles.size > 0) {
+          new Notice(t("settings.ragSyncPdfFailed", {
+            count: String(failedPdfFiles.size),
+            files: Array.from(failedPdfFiles).join("\n"),
+          }));
+        }
         void plugin.updateRagSetting(selectedRagSetting, { lastFullSync: Date.now() });
         void loadIndexedFiles();
       }
     } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") {
+      if (error instanceof Error && (error.name === "AbortError" || error.message === "Sync aborted")) {
         new Notice(t("settings.syncCancelled"));
         return;
       }

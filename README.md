@@ -183,6 +183,8 @@ Automatic tracking of AI-made changes with diff view and one-click restore.
 
 For large vaults, create multiple RAG settings for separate folders, sync each one, then create another RAG setting and enable **Combine internal RAG settings**. Select the synced source settings to search them together from one chat/search selector. Combined settings use the embedding server and model from the first selected source setting.
 
+During sync, changed files are processed and saved in small file batches so large first-time indexes can recover from an Obsidian crash without starting over. This is separate from the RAG chunk size setting. If a PDF cannot be extracted, it is listed after sync, its checksum is saved, and it appears in the indexed file list with `0 chunks`. It will not be retried on later syncs unless the PDF file changes. To force re-import, rename the PDF, modify the file, or clear/rebuild the RAG index.
+
 You can also enable **Use external index** and enter one external index directory per line. Each directory must contain `rag-index.json` and `rag-vectors.bin`.
 
 ![RAG Settings](docs/images/setting_rag_and_command.png)

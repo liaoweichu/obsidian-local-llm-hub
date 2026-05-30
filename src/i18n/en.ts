@@ -117,6 +117,7 @@ export const en = {
   "settings.ragSyncingEmbeddings": "Embedding",
   "settings.ragSyncSaving": "Saving index...",
   "settings.ragSynced": "Synced {{count}} chunks from {{files}} files",
+  "settings.ragSyncPdfFailed": "Skipped {{count}} PDF file(s) that could not be extracted:\n{{files}}",
   "settings.ragSyncFailed": "Sync failed: {{error}}",
   "settings.syncCancelled": "Sync cancelled",
   "settings.cancelSync": "Cancel",
