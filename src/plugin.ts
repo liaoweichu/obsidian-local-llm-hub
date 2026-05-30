@@ -410,6 +410,19 @@ export class LocalLlmHubPlugin extends Plugin {
     return this.wsManager.getRagSetting(name);
   }
 
+  getRagSearchSetting(name: string): RagSetting | null {
+    const setting = this.getRagSetting(name);
+    if (!setting) return null;
+    const sourceName = setting.sourceRagSettings[0];
+    const sourceSetting = sourceName ? this.getRagSetting(sourceName) : null;
+    if (!sourceSetting) return setting;
+    return {
+      ...setting,
+      embeddingModel: sourceSetting.embeddingModel,
+      embeddingBaseUrl: sourceSetting.embeddingBaseUrl,
+    };
+  }
+
   getSelectedRagSettingName(): string | null {
     return this.wsManager.workspaceState.selectedRagSetting;
   }

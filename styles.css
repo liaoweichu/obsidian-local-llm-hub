@@ -6232,3 +6232,18 @@ body.llm-hub-hide-workspace-folder .nav-folder[data-path="LocalLlmHub"] {
   word-break: break-word;
   color: var(--text-normal);
 }
+
+.llm-hub-rag-source-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 220px;
+}
+
+.llm-hub-rag-source-setting-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-normal);
+}

@@ -121,6 +121,16 @@ function isEmbeddingModelByName(name: string): boolean {
   return EMBEDDING_NAME_PATTERN.test(name);
 }
 
+function isOllamaDefaultUrl(baseUrl: string): boolean {
+  try {
+    const url = new URL(baseUrl);
+    const port = url.port || (url.protocol === "https:" ? "443" : "80");
+    return port === "11434" && (url.hostname === "localhost" || url.hostname === "127.0.0.1");
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Fetch available models from the local LLM server
  */
@@ -138,7 +148,7 @@ export async function fetchEmbeddingModels(config: LocalLlmConfig, embeddingBase
   try {
     const baseUrl = embeddingBaseUrl || config.baseUrl;
 
-    if (config.framework === "ollama" && !embeddingBaseUrl) {
+    if (config.framework === "ollama" || isOllamaDefaultUrl(baseUrl)) {
       const response = await requestUrl({
         url: `${baseUrl}/api/tags`,
         method: "GET",

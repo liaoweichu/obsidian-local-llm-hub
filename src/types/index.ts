@@ -31,6 +31,7 @@ export interface RagSetting {
   targetFolders: string[];      // folders to index (empty = all)
   excludePatterns: string[];    // regex patterns to exclude
   externalIndexPath: string;    // absolute path to external index directory (empty = vault sync)
+  sourceRagSettings: string[];  // names of internal RAG settings to merge (empty = standalone)
   lastFullSync: number | null;  // timestamp of last full sync
 }
 
@@ -44,6 +45,7 @@ export const DEFAULT_RAG_SETTING: RagSetting = {
   targetFolders: [],
   excludePatterns: [],
   externalIndexPath: "",
+  sourceRagSettings: [],
   lastFullSync: null,
 };
 

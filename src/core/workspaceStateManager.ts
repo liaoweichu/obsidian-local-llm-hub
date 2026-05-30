@@ -145,13 +145,22 @@ export class WorkspaceStateManager {
     if (!existing) {
       throw new Error(`RAG setting "${name}" not found`);
     }
-    this.workspaceState.ragSettings[name] = { ...existing, ...updates };
+    const next = { ...existing, ...updates };
+    if (next.sourceRagSettings.length > 0) {
+      next.sourceRagSettings = next.sourceRagSettings.filter(sourceName =>
+        sourceName !== name && !!this.workspaceState.ragSettings[sourceName]
+      );
+    }
+    this.workspaceState.ragSettings[name] = next;
     await this.saveWorkspaceState();
   }
 
   async deleteRagSetting(name: string): Promise<void> {
     if (!this.workspaceState.ragSettings[name]) return;
     delete this.workspaceState.ragSettings[name];
+    for (const setting of Object.values(this.workspaceState.ragSettings)) {
+      setting.sourceRagSettings = setting.sourceRagSettings.filter(sourceName => sourceName !== name);
+    }
     if (this.workspaceState.selectedRagSetting === name) {
       this.workspaceState.selectedRagSetting = null;
     }
@@ -177,6 +186,11 @@ export class WorkspaceStateManager {
 
     this.workspaceState.ragSettings[newName] = this.workspaceState.ragSettings[oldName];
     delete this.workspaceState.ragSettings[oldName];
+    for (const setting of Object.values(this.workspaceState.ragSettings)) {
+      setting.sourceRagSettings = setting.sourceRagSettings.map(sourceName =>
+        sourceName === oldName ? newName : sourceName
+      );
+    }
     if (this.workspaceState.selectedRagSetting === oldName) {
       this.workspaceState.selectedRagSetting = newName;
     }

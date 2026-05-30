@@ -181,6 +181,10 @@ Automatic tracking of AI-made changes with diff view and one-click restore.
 3. Configure target folders (optional — defaults to entire vault)
 4. Click **Sync** to build the index
 
+For large vaults, create multiple RAG settings for separate folders, sync each one, then create another RAG setting and enable **Combine internal RAG settings**. Select the synced source settings to search them together from one chat/search selector. Combined settings use the embedding server and model from the first selected source setting.
+
+You can also enable **Use external index** and enter one external index directory per line. Each directory must contain `rag-index.json` and `rag-vectors.bin`.
+
 ![RAG Settings](docs/images/setting_rag_and_command.png)
 
 ### MCP Server Setup

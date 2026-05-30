@@ -622,7 +622,7 @@ const Chat = forwardRef<ChatRef, ChatProps>(({ plugin }, ref) => {
       // RAG context injection
       let ragSources: string[] | undefined;
       if (selectedRagSetting) {
-        const ragSetting = plugin.getRagSetting(selectedRagSetting);
+        const ragSetting = plugin.getRagSearchSetting(selectedRagSetting);
         if (ragSetting) {
           try {
             const store = getRagStore();

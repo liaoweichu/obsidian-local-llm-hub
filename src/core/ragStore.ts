@@ -20,6 +20,8 @@ import {
 } from "./ragStorage";
 
 const EMBEDDING_FORMAT_VERSION = 2;
+const DEFAULT_EMBEDDING_BATCH_SIZE = 32;
+const OLLAMA_EMBEDDING_BATCH_SIZE = 4;
 
 export interface SyncResult {
   totalChunks: number;
@@ -30,6 +32,7 @@ export interface RagSyncProgress {
   current: number;
   total: number;
   filePath: string;
+  phase?: "scanning" | "embedding" | "saving";
 }
 
 export interface RagSearchResult {
@@ -57,6 +60,23 @@ function throwIfAborted(signal?: AbortSignal): void {
   }
 }
 
+function isOllamaDefaultUrl(baseUrl: string): boolean {
+  try {
+    const url = new URL(baseUrl);
+    const port = url.port || (url.protocol === "https:" ? "443" : "80");
+    return port === "11434" && (url.hostname === "localhost" || url.hostname === "127.0.0.1");
+  } catch {
+    return false;
+  }
+}
+
+function getEmbeddingBatchSize(ragSetting: RagSetting, llmConfig: LocalLlmConfig): number {
+  const embeddingBaseUrl = ragSetting.embeddingBaseUrl || llmConfig.baseUrl;
+  return llmConfig.framework === "ollama" || isOllamaDefaultUrl(embeddingBaseUrl)
+    ? OLLAMA_EMBEDDING_BATCH_SIZE
+    : DEFAULT_EMBEDDING_BATCH_SIZE;
+}
+
 interface StoreEntry {
   index: RagIndex | null;
   vectors: Float32Array | null;
@@ -66,11 +86,68 @@ interface StoreEntry {
 
 interface LoadOptions {
   externalIndexPath?: string;
+  sourceRagSettings?: string[];
+}
+
+export function parseExternalIndexPaths(externalIndexPath: string): string[] {
+  return externalIndexPath
+    .split(/\n+/)
+    .map(path => path.trim())
+    .filter(path => path.length > 0);
+}
+
+function mergeLoadedIndexes(loadedIndexes: { index: RagIndex; vectors: Float32Array }[]): {
+  index: RagIndex | null;
+  vectors: Float32Array | null;
+} {
+  if (loadedIndexes.length === 0) {
+    return { index: null, vectors: null };
+  }
+
+  const dimension = loadedIndexes[0].index.dimension;
+  if (dimension <= 0) {
+    return { index: null, vectors: null };
+  }
+
+  const compatibleIndexes = loadedIndexes.filter(item =>
+    item.index.dimension === dimension &&
+    item.vectors.length >= item.index.meta.length * dimension
+  );
+  if (compatibleIndexes.length === 0) {
+    return { index: null, vectors: null };
+  }
+
+  const totalChunks = compatibleIndexes.reduce((sum, item) => sum + item.index.meta.length, 0);
+  const mergedVectors = new Float32Array(totalChunks * dimension);
+  const mergedMeta: ChunkMeta[] = [];
+  const mergedChecksums: Record<string, string> = {};
+  let offset = 0;
+
+  for (const item of compatibleIndexes) {
+    mergedMeta.push(...item.index.meta);
+    Object.assign(mergedChecksums, item.index.fileChecksums ?? {});
+    const vectorLength = item.index.meta.length * dimension;
+    mergedVectors.set(item.vectors.subarray(0, vectorLength), offset);
+    offset += vectorLength;
+  }
+
+  return {
+    index: {
+      meta: mergedMeta,
+      dimension,
+      fileChecksums: mergedChecksums,
+      embeddingFormatVersion: EMBEDDING_FORMAT_VERSION,
+      chunkSize: compatibleIndexes[0].index.chunkSize,
+      chunkOverlap: compatibleIndexes[0].index.chunkOverlap,
+    },
+    vectors: mergedVectors,
+  };
 }
 
 class RagStore {
   private entries = new Map<string, StoreEntry>();
   private externalPaths = new Map<string, string>();
+  private sourceRagSettings = new Map<string, string[]>();
 
   async load(app: App, settingNames: string[], ragSettings?: Record<string, RagSetting>): Promise<void> {
     if (ragSettings) {
@@ -78,10 +155,14 @@ class RagStore {
         if (setting.externalIndexPath) {
           this.externalPaths.set(name, setting.externalIndexPath);
         }
+        this.setSourceRagSettings(name, setting.sourceRagSettings);
       }
     }
     for (const name of settingNames) {
-      await this.ensureLoaded(app, name, { externalIndexPath: ragSettings?.[name]?.externalIndexPath });
+      await this.ensureLoaded(app, name, {
+        externalIndexPath: ragSettings?.[name]?.externalIndexPath,
+        sourceRagSettings: ragSettings?.[name]?.sourceRagSettings,
+      });
     }
   }
 
@@ -95,9 +176,20 @@ class RagStore {
     this.entries.delete(settingName);
   }
 
+  setSourceRagSettings(settingName: string, sourceNames: string[]): void {
+    const filtered = sourceNames.filter(sourceName => sourceName !== settingName);
+    if (filtered.length > 0) {
+      this.sourceRagSettings.set(settingName, filtered);
+    } else {
+      this.sourceRagSettings.delete(settingName);
+    }
+    this.entries.delete(settingName);
+  }
+
   invalidateEntry(settingName: string): void {
     this.entries.delete(settingName);
     this.externalPaths.delete(settingName);
+    this.sourceRagSettings.delete(settingName);
   }
 
   getStatus(settingName: string): RagStatus {
@@ -130,47 +222,11 @@ class RagStore {
     const files = getTargetFiles(app, ragSetting);
     const totalFiles = files.length;
 
-    // Compute checksums for all files
-    const newChecksums: Record<string, string> = {};
-    const fileContents = new Map<string, string>();
-    const pdfInfoMap = new Map<string, PdfExtractResult>();
-    const pdfExtractFailed = new Set<string>();
-
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      throwIfAborted(signal);
-      onProgress?.({
-        current: i + 1,
-        total: totalFiles,
-        filePath: file.path,
-      });
-      if (file.extension === "pdf") {
-        let result: PdfExtractResult | null;
-        try {
-          result = await extractPdfText(app, file);
-        } catch (err) {
-          // Extraction failed — mark for preserving old chunks later
-          console.warn(`Local LLM Hub: PDF extraction failed for ${file.path}:`, err);
-          pdfExtractFailed.add(file.path);
-          continue;
-        }
-        if (!result) continue; // skip PDFs with no extractable text
-        const checksum = simpleChecksum(result.text);
-        newChecksums[file.path] = checksum;
-        fileContents.set(file.path, result.text);
-        pdfInfoMap.set(file.path, result);
-      } else {
-        const content = await app.vault.cachedRead(file);
-        const checksum = simpleChecksum(content);
-        newChecksums[file.path] = checksum;
-        fileContents.set(file.path, content);
-      }
-    }
-
-    // Force fresh load
+    // Force fresh load before scanning so unchanged PDFs can skip text extraction.
     this.entries.delete(settingName);
     const entry = await this.ensureLoaded(app, settingName, {
       externalIndexPath: ragSetting.externalIndexPath,
+      sourceRagSettings: ragSetting.sourceRagSettings,
     });
     let { index, vectors } = entry;
     const incompatible = entry.incompatibleIndexLoaded;
@@ -187,6 +243,57 @@ class RagStore {
     }
 
     const oldChecksums = index?.fileChecksums || {};
+
+    // Compute checksums for all files
+    const newChecksums: Record<string, string> = {};
+    const fileContents = new Map<string, string>();
+    const pdfInfoMap = new Map<string, PdfExtractResult>();
+    const pdfExtractFailed = new Set<string>();
+    const migratedPdfChecksums = new Set<string>();
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      throwIfAborted(signal);
+      onProgress?.({
+        current: i + 1,
+        total: totalFiles,
+        filePath: file.path,
+        phase: "scanning",
+      });
+      if (file.extension === "pdf") {
+        const checksum = await fileChecksum(app, file);
+        newChecksums[file.path] = checksum;
+        if (checksum === oldChecksums[file.path]) {
+          continue;
+        }
+
+        let result: PdfExtractResult | null;
+        try {
+          result = await extractPdfText(app, file);
+        } catch (err) {
+          // Extraction failed — mark for preserving old chunks later
+          console.warn(`Local LLM Hub: PDF extraction failed for ${file.path}:`, err);
+          delete newChecksums[file.path];
+          pdfExtractFailed.add(file.path);
+          continue;
+        }
+        if (!result) {
+          delete newChecksums[file.path];
+          continue; // skip PDFs with no extractable text
+        }
+        if (oldChecksums[file.path] && simpleChecksum(result.text) === oldChecksums[file.path]) {
+          migratedPdfChecksums.add(file.path);
+          continue;
+        }
+        fileContents.set(file.path, result.text);
+        pdfInfoMap.set(file.path, result);
+      } else {
+        const content = await app.vault.cachedRead(file);
+        const checksum = simpleChecksum(content);
+        newChecksums[file.path] = checksum;
+        fileContents.set(file.path, content);
+      }
+    }
 
     // Find files that changed
     const changedFiles: string[] = [];
@@ -206,7 +313,7 @@ class RagStore {
     if (index && vectors) {
       for (let i = 0; i < index.meta.length; i++) {
         const chunk = index.meta[i];
-        if (newChecksums[chunk.filePath] === oldChecksums[chunk.filePath]) {
+        if (newChecksums[chunk.filePath] === oldChecksums[chunk.filePath] || migratedPdfChecksums.has(chunk.filePath)) {
           unchangedChunks.meta.push(chunk);
           const dim = index.dimension;
           const vec = Array.from(vectors.slice(i * dim, (i + 1) * dim));
@@ -217,6 +324,7 @@ class RagStore {
 
     // Find changed or new files
     for (const [filePath, checksum] of Object.entries(newChecksums)) {
+      if (migratedPdfChecksums.has(filePath)) continue;
       if (checksum !== oldChecksums[filePath]) {
         changedFiles.push(filePath);
       }
@@ -262,13 +370,26 @@ class RagStore {
       }
 
       // Batch embed (max 32 at a time)
-      const BATCH_SIZE = 32;
+      const BATCH_SIZE = getEmbeddingBatchSize(ragSetting, llmConfig);
+      const totalBatches = Math.ceil(allTexts.length / BATCH_SIZE);
+      onProgress?.({
+        current: 0,
+        total: totalBatches,
+        filePath: allMetas[0]?.filePath ?? "",
+        phase: "embedding",
+      });
       for (let i = 0; i < allTexts.length; i += BATCH_SIZE) {
         throwIfAborted(signal);
         const batch = allTexts.slice(i, i + BATCH_SIZE);
         const embeddings = await generateEmbeddings(batch, ragSetting, llmConfig);
         throwIfAborted(signal);
         newEmbeddings.push(...embeddings);
+        onProgress?.({
+          current: Math.floor(i / BATCH_SIZE) + 1,
+          total: totalBatches,
+          filePath: allMetas[Math.min(i + BATCH_SIZE, allMetas.length - 1)]?.filePath ?? "",
+          phase: "embedding",
+        });
       }
 
       newChunks.push(...allMetas);
@@ -288,6 +409,12 @@ class RagStore {
     }
 
     throwIfAborted(signal);
+    onProgress?.({
+      current: 1,
+      total: 1,
+      filePath: "",
+      phase: "saving",
+    });
 
     // Save
     const newIndex: RagIndex = {
@@ -327,6 +454,7 @@ class RagStore {
   ): Promise<{ path: string; syncedAt: string }> {
     const entry = await this.ensureLoaded(app, settingName, {
       externalIndexPath: ragSetting.externalIndexPath,
+      sourceRagSettings: ragSetting.sourceRagSettings,
     });
 
     if (entry.incompatibleIndexLoaded) {
@@ -364,6 +492,13 @@ class RagStore {
       const isPdf = file.extension === "pdf";
       let content: string | null;
       let pdfInfo: PdfExtractResult | undefined;
+      const markdownContent = isPdf ? null : await app.vault.cachedRead(file);
+      const checksum = isPdf ? await fileChecksum(app, file) : simpleChecksum(markdownContent ?? "");
+
+      if (!oldPath && checksum === checksums[filePath]) {
+        return { path: filePath, syncedAt: new Date().toISOString() };
+      }
+
       if (isPdf) {
         let result: PdfExtractResult | null;
         try {
@@ -381,16 +516,10 @@ class RagStore {
           pdfInfo = result;
         }
       } else {
-        content = await app.vault.cachedRead(file);
+        content = markdownContent;
       }
 
       if (content) {
-        const checksum = simpleChecksum(content);
-
-        if (!oldPath && checksum === checksums[filePath]) {
-          return { path: filePath, syncedAt: new Date().toISOString() };
-        }
-
         checksums[filePath] = checksum;
 
         const chunks = chunkText(content, ragSetting.chunkSize, ragSetting.chunkOverlap);
@@ -400,7 +529,7 @@ class RagStore {
             const prefix = heading ? `[${filePath} > ${heading}]\n` : `[${filePath}]\n`;
             return prefix + c.text;
           });
-          const BATCH_SIZE = 32;
+          const BATCH_SIZE = getEmbeddingBatchSize(ragSetting, llmConfig);
           const newEmbeddings: number[][] = [];
           for (let i = 0; i < texts.length; i += BATCH_SIZE) {
             const batch = texts.slice(i, i + BATCH_SIZE);
@@ -473,6 +602,7 @@ class RagStore {
   ): Promise<RagSearchResult[]> {
     const entry = await this.ensureLoaded(app, settingName, {
       externalIndexPath: ragSetting.externalIndexPath,
+      sourceRagSettings: ragSetting.sourceRagSettings,
     });
 
     if (!entry.index || !entry.vectors || entry.index.meta.length === 0) {
@@ -642,21 +772,42 @@ class RagStore {
         this.externalPaths.delete(settingName);
       }
     }
+    if (options?.sourceRagSettings !== undefined) {
+      this.setSourceRagSettings(settingName, options.sourceRagSettings);
+    }
     const existing = this.entries.get(settingName);
     if (existing?.loaded) {
       return existing;
     }
 
     const externalPath = this.externalPaths.get(settingName);
+    const externalPaths = externalPath ? parseExternalIndexPaths(externalPath) : [];
+    const sourceNames = this.sourceRagSettings.get(settingName) ?? [];
     let index: RagIndex | null = null;
     let vectors: Float32Array | null = null;
     let incompatibleIndexLoaded = false;
 
-    if (externalPath) {
-      index = await loadExternalRagIndex(externalPath);
-      if (index && index.meta.length > 0) {
-        vectors = await loadExternalRagVectors(externalPath);
+    if (sourceNames.length > 0) {
+      const loadedIndexes: { index: RagIndex; vectors: Float32Array }[] = [];
+      for (const sourceName of sourceNames) {
+        const sourceEntry = await this.ensureLoaded(app, sourceName);
+        if (!sourceEntry.index || !sourceEntry.vectors || sourceEntry.index.meta.length === 0) continue;
+        loadedIndexes.push({ index: sourceEntry.index, vectors: sourceEntry.vectors });
       }
+      ({ index, vectors } = mergeLoadedIndexes(loadedIndexes));
+    } else if (externalPath) {
+      const loadedIndexes: { index: RagIndex; vectors: Float32Array }[] = [];
+      for (const path of externalPaths) {
+        const externalIndex = await loadExternalRagIndex(path);
+        if (!externalIndex || externalIndex.meta.length === 0) continue;
+        if (externalIndex.dimension <= 0) continue;
+        const externalVectors = await loadExternalRagVectors(path);
+        if (!externalVectors) continue;
+        if (externalVectors.length < externalIndex.meta.length * externalIndex.dimension) continue;
+        loadedIndexes.push({ index: externalIndex, vectors: externalVectors });
+      }
+
+      ({ index, vectors } = mergeLoadedIndexes(loadedIndexes));
     } else {
       index = await loadRagIndex(app, settingName);
       if (index) {
@@ -846,6 +997,24 @@ export function simpleChecksum(content: string): string {
     hash |= 0;
   }
   return hash.toString(36);
+}
+
+export function simpleChecksumBytes(buffer: ArrayBuffer): string {
+  let hash = 0;
+  const bytes = new Uint8Array(buffer);
+  for (const byte of bytes) {
+    hash = ((hash << 5) - hash) + byte;
+    hash |= 0;
+  }
+  return hash.toString(36);
+}
+
+async function fileChecksum(app: App, file: TFile): Promise<string> {
+  if (file.extension === "pdf") {
+    const buffer = await app.vault.readBinary(file);
+    return `pdf:${simpleChecksumBytes(buffer)}`;
+  }
+  return simpleChecksum(await app.vault.cachedRead(file));
 }
 
 /**

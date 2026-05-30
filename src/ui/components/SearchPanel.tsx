@@ -101,7 +101,9 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
 
   // Check if current setting is internal (not external index)
   const currentRagSetting = plugin.getRagSetting(selectedRagSetting);
-  const isInternalRag = currentRagSetting ? !currentRagSetting.externalIndexPath : false;
+  const isInternalRag = currentRagSetting
+    ? !currentRagSetting.externalIndexPath && currentRagSetting.sourceRagSettings.length === 0
+    : false;
 
   // Abort AI suggestions on unmount
   useEffect(() => {
@@ -265,6 +267,16 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
     }
   }, [plugin, selectedRagSetting, ragSyncing, loadIndexedFiles]);
 
+  const formatSyncProgress = (progress: RagSyncProgress): string => {
+    if (progress.phase === "embedding") {
+      return `${t("settings.ragSyncingEmbeddings")}: ${progress.filePath} (${progress.current}/${progress.total})`;
+    }
+    if (progress.phase === "saving") {
+      return t("settings.ragSyncSaving");
+    }
+    return `${progress.filePath} (${progress.current}/${progress.total})`;
+  };
+
   const handleSearch = async () => {
     if (isSearching) return;
     if (!selectedRagSetting) {
@@ -276,7 +288,7 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
       return;
     }
 
-    const ragSetting = plugin.getRagSetting(selectedRagSetting);
+    const ragSetting = plugin.getRagSearchSetting(selectedRagSetting);
     if (!ragSetting) {
       new Notice(t("search.ragSettingNotFound"));
       return;
@@ -648,7 +660,7 @@ export default function SearchPanel({ plugin, onChatWithResults }: SearchPanelPr
                   max={Math.max(ragSyncProgress.total, 1)}
                 />
                 <span className="llm-hub-rag-sync-progress-text">
-                  {ragSyncProgress.filePath} ({ragSyncProgress.current}/{ragSyncProgress.total})
+                  {formatSyncProgress(ragSyncProgress)}
                 </span>
               </div>
             )}

@@ -1,7 +1,31 @@
 import { describe, it, expect } from "vitest";
-import { chunkText, cosineSimilarity, simpleChecksum, findNearestHeading } from "./ragStore";
+import {
+  chunkText,
+  cosineSimilarity,
+  simpleChecksum,
+  simpleChecksumBytes,
+  findNearestHeading,
+  parseExternalIndexPaths,
+} from "./ragStore";
 
 // --- chunkText ---
+
+describe("parseExternalIndexPaths", () => {
+  it("parses one external index path per line", () => {
+    expect(parseExternalIndexPaths("/tmp/index-a\n/tmp/index-b\n  /tmp/index-c  ")).toEqual([
+      "/tmp/index-a",
+      "/tmp/index-b",
+      "/tmp/index-c",
+    ]);
+  });
+
+  it("preserves commas in paths", () => {
+    expect(parseExternalIndexPaths("/tmp/index,with-comma\n/tmp/index-b")).toEqual([
+      "/tmp/index,with-comma",
+      "/tmp/index-b",
+    ]);
+  });
+});
 
 describe("chunkText", () => {
   it("returns a single chunk for short text", () => {
@@ -220,5 +244,17 @@ describe("simpleChecksum", () => {
 
   it("is sensitive to small changes", () => {
     expect(simpleChecksum("abc")).not.toBe(simpleChecksum("abd"));
+  });
+});
+
+describe("simpleChecksumBytes", () => {
+  it("returns consistent results for the same bytes", () => {
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    expect(simpleChecksumBytes(bytes.buffer)).toBe(simpleChecksumBytes(bytes.buffer));
+  });
+
+  it("returns different results for different bytes", () => {
+    expect(simpleChecksumBytes(new Uint8Array([1, 2, 3]).buffer))
+      .not.toBe(simpleChecksumBytes(new Uint8Array([1, 2, 4]).buffer));
   });
 });

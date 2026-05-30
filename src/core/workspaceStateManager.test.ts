@@ -204,6 +204,20 @@ describe("WorkspaceStateManager", () => {
       expect(manager.getRagSettingNames()).toEqual(["A"]);
     });
 
+    it("removes deleted settings from source RAG bundles", async () => {
+      const { app } = createAppMock();
+      const emitter = createEmitter();
+      const manager = new WorkspaceStateManager(app as never, emitter as never);
+
+      await manager.createRagSetting("A");
+      await manager.createRagSetting("B");
+      await manager.createRagSetting("Combined", { sourceRagSettings: ["A", "B"] });
+
+      await manager.deleteRagSetting("B");
+
+      expect(manager.getRagSetting("Combined")!.sourceRagSettings).toEqual(["A"]);
+    });
+
     it("is a no-op for non-existent setting", async () => {
       const { app } = createAppMock();
       const emitter = createEmitter();
@@ -228,6 +242,19 @@ describe("WorkspaceStateManager", () => {
       expect(manager.getRagSetting("New")).toMatchObject({ topK: 10 });
       expect(manager.getRagSetting("Old")).toBeNull();
       expect(manager.workspaceState.selectedRagSetting).toBe("New");
+    });
+
+    it("updates source RAG bundle references when renaming", async () => {
+      const { app } = createAppMock();
+      const emitter = createEmitter();
+      const manager = new WorkspaceStateManager(app as never, emitter as never);
+
+      await manager.createRagSetting("A");
+      await manager.createRagSetting("Combined", { sourceRagSettings: ["A"] });
+
+      await manager.renameRagSetting("A", "Renamed");
+
+      expect(manager.getRagSetting("Combined")!.sourceRagSettings).toEqual(["Renamed"]);
     });
 
     it("throws when old name does not exist", async () => {
@@ -277,6 +304,18 @@ describe("WorkspaceStateManager", () => {
       await manager.updateRagSetting("Test", { topK: 20, minScore: 0.8 });
 
       expect(manager.getRagSetting("Test")).toMatchObject({ topK: 20, minScore: 0.8 });
+    });
+
+    it("filters self and missing source RAG settings", async () => {
+      const { app } = createAppMock();
+      const emitter = createEmitter();
+      const manager = new WorkspaceStateManager(app as never, emitter as never);
+
+      await manager.createRagSetting("A");
+      await manager.createRagSetting("Combined");
+      await manager.updateRagSetting("Combined", { sourceRagSettings: ["A", "Combined", "missing"] });
+
+      expect(manager.getRagSetting("Combined")!.sourceRagSettings).toEqual(["A"]);
     });
 
     it("throws when setting does not exist", async () => {
@@ -339,6 +378,7 @@ describe("WorkspaceStateManager", () => {
       expect(setting).not.toBeNull();
       expect(setting!.embeddingModel).toBe("custom-model");
       expect(setting!.externalIndexPath).toBe("");
+      expect(setting!.sourceRagSettings).toEqual([]);
       expect(setting!.chunkSize).toBe(1000);
     });
 

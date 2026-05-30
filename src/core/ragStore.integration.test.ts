@@ -3,10 +3,31 @@
  * Requires Ollama running at localhost:11434
  * Run with: npm run test:integration
  */
-import { describe, it, expect, beforeAll } from "vitest";
-import { chunkText, cosineSimilarity } from "./ragStore";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { describe, it, expect, beforeAll, vi } from "vitest";
 
-const OLLAMA_BASE_URL = "http://localhost:11434";
+vi.mock("obsidian", () => ({
+  App: class {},
+  TFile: class {},
+  loadPdfJs: vi.fn(),
+  requestUrl: async (options: { url: string; method?: string; headers?: Record<string, string>; body?: string }) => {
+    const response = await fetch(options.url, {
+      method: options.method,
+      headers: options.headers,
+      body: options.body,
+    });
+    return {
+      status: response.status,
+      json: await response.json(),
+    };
+  },
+}));
+
+import { chunkText, cosineSimilarity, getRagStore } from "./ragStore";
+import type { LocalLlmConfig, RagSetting } from "../types";
+
+const OLLAMA_BASE_URL = "http://127.0.0.1:11434";
 const EMBEDDING_MODEL = "nomic-embed-text";
 
 // Skip all tests if INTEGRATION env var is not set
@@ -41,6 +62,8 @@ async function generateEmbedding(text: string): Promise<number[]> {
 
 describe.skipIf(!runIntegration)("RAG Integration Tests", () => {
   beforeAll(async () => {
+    (globalThis as unknown as { activeWindow: { require: NodeRequire } }).activeWindow = { require };
+
     // Verify Ollama is reachable
     try {
       const res = await fetch(`${OLLAMA_BASE_URL}/api/tags`);
@@ -213,6 +236,73 @@ describe.skipIf(!runIntegration)("RAG Integration Tests", () => {
 
       // The top result should contain "RAG"
       expect(scores[0].text).toContain("RAG");
+    });
+
+    it("searches across multiple external indexes in one RAG setting", async () => {
+      const baseDir = path.join("/tmp", `llm-hub-rag-multi-${Date.now()}`);
+      const indexADir = path.join(baseDir, "index-a");
+      const indexBDir = path.join(baseDir, "index-b");
+      try {
+        await fs.mkdir(indexADir, { recursive: true });
+        await fs.mkdir(indexBDir, { recursive: true });
+
+        const writeExternalIndex = async (dir: string, filePath: string, text: string) => {
+          const embeddings = await generateEmbeddings([text]);
+          const vector = new Float32Array(embeddings[0]);
+          await fs.writeFile(path.join(dir, "rag-index.json"), JSON.stringify({
+            meta: [{ filePath, startOffset: 0, text }],
+            dimension: vector.length,
+            fileChecksums: { [filePath]: "integration-test" },
+            embeddingFormatVersion: 2,
+            chunkSize: 1000,
+            chunkOverlap: 200,
+          }));
+          await fs.writeFile(path.join(dir, "rag-vectors.bin"), Buffer.from(vector.buffer));
+        };
+
+        await writeExternalIndex(
+          indexADir,
+          "docs/database.md",
+          "The application stores records in PostgreSQL with relational tables."
+        );
+        await writeExternalIndex(
+          indexBDir,
+          "docs/rag.md",
+          "RAG retrieves relevant note chunks and injects them into the chat context."
+        );
+
+        const ragSetting: RagSetting = {
+          embeddingModel: EMBEDDING_MODEL,
+          embeddingBaseUrl: OLLAMA_BASE_URL,
+          chunkSize: 1000,
+          chunkOverlap: 200,
+          topK: 2,
+          minScore: -1,
+          targetFolders: [],
+          excludePatterns: [],
+          externalIndexPath: `${indexADir}\n${indexBDir}`,
+          lastFullSync: null,
+        };
+        const llmConfig: LocalLlmConfig = {
+          framework: "ollama",
+          baseUrl: OLLAMA_BASE_URL,
+          model: "",
+        };
+
+        const results = await getRagStore().search(
+          "integration-multi-external",
+          "How does RAG use note chunks?",
+          ragSetting,
+          llmConfig,
+          {} as never,
+        );
+
+        expect(results.map(result => result.filePath)).toContain("docs/database.md");
+        expect(results.map(result => result.filePath)).toContain("docs/rag.md");
+        expect(results[0].filePath).toBe("docs/rag.md");
+      } finally {
+        await fs.rm(baseDir, { recursive: true, force: true });
+      }
     });
   });
 });

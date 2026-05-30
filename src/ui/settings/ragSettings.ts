@@ -14,6 +14,7 @@ interface SettingsContext {
 }
 
 const EMBEDDING_BASE_URL_PLACEHOLDER = "http://localhost:8001";
+type RagSettingMode = "internal" | "combined" | "external";
 
 export function displayRagSettings(containerEl: HTMLElement, ctx: SettingsContext): void {
   const { plugin, display } = ctx;
@@ -89,6 +90,8 @@ function displaySelectedRagSetting(
 ): void {
   const { plugin, display } = ctx;
   const isExternal = !!ragSetting.externalIndexPath;
+  const isBundle = ragSetting.sourceRagSettings.length > 0;
+  const mode: RagSettingMode = isBundle ? "combined" : isExternal ? "external" : "internal";
 
   const updateSetting = async (updates: Partial<RagSetting>) => {
     await plugin.updateRagSetting(name, updates);
@@ -149,112 +152,156 @@ function displaySelectedRagSetting(
       })
   );
 
-  // External index toggle
+  // RAG index mode
   new Setting(containerEl)
-    .setName(t("settings.ragExternalIndex"))
-    .setDesc(t("settings.ragExternalIndexDesc"))
-    .addToggle((toggle) =>
-      toggle.setValue(isExternal).onChange((value) => {
-        void (async () => {
-          await updateSetting({ externalIndexPath: value ? " " : "" });
-          getRagStore().setExternalPath(name, value ? " " : "");
-          display();
-        })();
-      })
-    );
+    .setName(t("settings.ragMode"))
+    .setDesc(t("settings.ragModeDesc"))
+    .addDropdown((dropdown) => {
+      dropdown
+        .addOption("internal", t("settings.ragModeInternal"))
+        .addOption("combined", t("settings.ragModeCombined"))
+        .addOption("external", t("settings.ragModeExternal"))
+        .setValue(mode)
+        .onChange((value) => {
+          const nextMode = value as RagSettingMode;
+          const defaultSource = plugin.getRagSettingNames().filter(sourceName => sourceName !== name).slice(0, 1);
+          const sourceRagSettings = nextMode === "combined"
+            ? (ragSetting.sourceRagSettings.length > 0 ? ragSetting.sourceRagSettings : defaultSource)
+            : [];
+          const externalIndexPath = nextMode === "external" ? (ragSetting.externalIndexPath || " ") : "";
+          void (async () => {
+            await updateSetting({ sourceRagSettings, externalIndexPath });
+            getRagStore().setExternalPath(name, externalIndexPath);
+            display();
+          })().catch((err) => new Notice(String(err)));
+        });
+    });
+
+  if (isBundle) {
+    const sourceNames = plugin.getRagSettingNames().filter(sourceName => sourceName !== name);
+    const sourceSetting = new Setting(containerEl)
+      .setName(t("settings.ragSourceSettingsSelect"))
+      .setDesc(t("settings.ragSourceSettingsSelectDesc"));
+    const sourceContainer = sourceSetting.controlEl.createDiv({ cls: "llm-hub-rag-source-settings" });
+    if (sourceNames.length === 0) {
+      sourceContainer.setText(t("settings.ragSourceSettingsEmpty"));
+    } else {
+      for (const sourceName of sourceNames) {
+        const label = sourceContainer.createEl("label", { cls: "llm-hub-rag-source-setting-option" });
+        const checkbox = label.createEl("input", {
+          type: "checkbox",
+          value: sourceName,
+        });
+        checkbox.checked = ragSetting.sourceRagSettings.includes(sourceName);
+        label.createSpan({ text: sourceName });
+        checkbox.addEventListener("change", () => {
+          void (async () => {
+            const nextSources = checkbox.checked
+              ? [...ragSetting.sourceRagSettings, sourceName]
+              : ragSetting.sourceRagSettings.filter(item => item !== sourceName);
+            await updateSetting({ sourceRagSettings: [...new Set(nextSources)] });
+            display();
+          })().catch((err) => new Notice(String(err)));
+        });
+      }
+    }
+  }
 
   if (isExternal) {
-    // External index path
+    // External index paths
     new Setting(containerEl)
       .setName(t("settings.ragExternalIndexPath"))
       .setDesc(t("settings.ragExternalIndexPathDesc"))
-      .addText((text) => {
+      .addTextArea((text) => {
         text
           .setPlaceholder(t("settings.ragExternalIndexPathPlaceholder"))
           .setValue(ragSetting.externalIndexPath.trim())
           .onChange((value) => {
             void (async () => {
-              const path = value.trim() || " "; // keep toggle on
+              const path = value.trim() || " "; // keep external mode selected
               await updateSetting({ externalIndexPath: path });
               getRagStore().setExternalPath(name, path);
             })().catch((err) => new Notice(String(err)));
           });
         text.inputEl.addClass("llm-hub-wide-input");
+        text.inputEl.rows = 4;
       });
   }
 
-  // Embedding server URL
-  new Setting(containerEl)
-    .setName(t("settings.ragEmbeddingBaseUrl"))
-    .setDesc(t("settings.ragEmbeddingBaseUrlDesc"))
-    .addText((text) => {
-      text
-        .setPlaceholder(EMBEDDING_BASE_URL_PLACEHOLDER)
-        .setValue(ragSetting.embeddingBaseUrl || "")
-        .onChange((value) => {
-          void updateSetting({ embeddingBaseUrl: value.trim() }).catch((err) => new Notice(String(err)));
-        });
-      text.inputEl.addClass("llm-hub-wide-input");
+  if (!isBundle) {
+    // Embedding server URL
+    new Setting(containerEl)
+      .setName(t("settings.ragEmbeddingBaseUrl"))
+      .setDesc(t("settings.ragEmbeddingBaseUrlDesc"))
+      .addText((text) => {
+        text
+          .setPlaceholder(EMBEDDING_BASE_URL_PLACEHOLDER)
+          .setValue(ragSetting.embeddingBaseUrl || "")
+          .onChange((value) => {
+            void updateSetting({ embeddingBaseUrl: value.trim() }).catch((err) => new Notice(String(err)));
+          });
+        text.inputEl.addClass("llm-hub-wide-input");
+      });
+
+    // Embedding model
+    const embeddingModelSetting = new Setting(containerEl)
+      .setName(t("settings.ragEmbeddingModel"))
+      .setDesc(t("settings.ragEmbeddingModelDesc"));
+
+    let embeddingDropdown: HTMLSelectElement | null = null;
+    embeddingModelSetting.controlEl.createEl("select", {}, (select) => {
+      embeddingDropdown = select;
+      select.addClass("dropdown");
+      if (!ragSetting.embeddingModel) {
+        const placeholder = select.createEl("option", { text: t("settings.ragEmbeddingModelPlaceholder"), value: "" });
+        placeholder.disabled = true;
+        placeholder.selected = true;
+      } else {
+        const opt = select.createEl("option", { text: ragSetting.embeddingModel, value: ragSetting.embeddingModel });
+        opt.selected = true;
+      }
+      select.addEventListener("change", () => {
+        void updateSetting({ embeddingModel: select.value }).catch((err) => new Notice(String(err)));
+      });
     });
 
-  // Embedding model
-  const embeddingModelSetting = new Setting(containerEl)
-    .setName(t("settings.ragEmbeddingModel"))
-    .setDesc(t("settings.ragEmbeddingModelDesc"));
-
-  let embeddingDropdown: HTMLSelectElement | null = null;
-  embeddingModelSetting.controlEl.createEl("select", {}, (select) => {
-    embeddingDropdown = select;
-    select.addClass("dropdown");
-    if (!ragSetting.embeddingModel) {
-      const placeholder = select.createEl("option", { text: t("settings.ragEmbeddingModelPlaceholder"), value: "" });
-      placeholder.disabled = true;
-      placeholder.selected = true;
-    } else {
-      const opt = select.createEl("option", { text: ragSetting.embeddingModel, value: ragSetting.embeddingModel });
-      opt.selected = true;
-    }
-    select.addEventListener("change", () => {
-      void updateSetting({ embeddingModel: select.value }).catch((err) => new Notice(String(err)));
-    });
-  });
-
-  embeddingModelSetting.addButton((btn) =>
-    btn
-      .setButtonText(t("settings.llmModal.fetchModels"))
-      .onClick(async () => {
-        btn.setButtonText(t("settings.llmModal.fetching"));
-        btn.setDisabled(true);
-        try {
-          const models = await fetchEmbeddingModels(plugin.settings.llmConfig, ragSetting.embeddingBaseUrl || undefined);
-          if (models.length === 0) {
-            new Notice(t("settings.llmModal.noModelsFound"));
-            return;
-          }
-          if (embeddingDropdown) {
-            embeddingDropdown.empty();
-            for (const model of models) {
-              const opt = embeddingDropdown.createEl("option", { text: model, value: model });
-              if (model === ragSetting.embeddingModel) {
-                opt.selected = true;
+    embeddingModelSetting.addButton((btn) =>
+      btn
+        .setButtonText(t("settings.llmModal.fetchModels"))
+        .onClick(async () => {
+          btn.setButtonText(t("settings.llmModal.fetching"));
+          btn.setDisabled(true);
+          try {
+            const models = await fetchEmbeddingModels(plugin.settings.llmConfig, ragSetting.embeddingBaseUrl || undefined);
+            if (models.length === 0) {
+              new Notice(t("settings.llmModal.noModelsFound"));
+              return;
+            }
+            if (embeddingDropdown) {
+              embeddingDropdown.empty();
+              for (const model of models) {
+                const opt = embeddingDropdown.createEl("option", { text: model, value: model });
+                if (model === ragSetting.embeddingModel) {
+                  opt.selected = true;
+                }
+              }
+              if (!ragSetting.embeddingModel || !models.includes(ragSetting.embeddingModel)) {
+                await updateSetting({ embeddingModel: models[0] });
+                embeddingDropdown.value = models[0];
               }
             }
-            if (!ragSetting.embeddingModel || !models.includes(ragSetting.embeddingModel)) {
-              await updateSetting({ embeddingModel: models[0] });
-              embeddingDropdown.value = models[0];
-            }
+            new Notice(t("settings.llmModal.modelsLoaded", { count: String(models.length) }));
+          } catch (err) {
+            new Notice(`Error: ${err instanceof Error ? err.message : String(err)}`);
+          } finally {
+            btn.setButtonText(t("settings.llmModal.fetchModels"));
+            btn.setDisabled(false);
           }
-          new Notice(t("settings.llmModal.modelsLoaded", { count: String(models.length) }));
-        } catch (err) {
-          new Notice(`Error: ${err instanceof Error ? err.message : String(err)}`);
-        } finally {
-          btn.setButtonText(t("settings.llmModal.fetchModels"));
-          btn.setDisabled(false);
-        }
-      })
-  );
+        })
+    );
+  }
 
-  if (!isExternal) {
+  if (!isExternal && !isBundle) {
     // Target folders (vault sync only)
     new Setting(containerEl)
       .setName(t("settings.ragTargetFolders"))
@@ -391,7 +438,7 @@ function displaySelectedRagSetting(
   updateStatusDesc();
   void store.load(plugin.app, [name], { [name]: ragSetting }).then(updateStatusDesc);
 
-  if (!isExternal) {
+  if (!isExternal && !isBundle) {
     const progressContainer = statusSetting.settingEl.createDiv({
       cls: "llm-hub-settings-sync-progress",
     });
@@ -427,7 +474,13 @@ function displaySelectedRagSetting(
                 const percent = Math.round((progress.current / Math.max(progress.total, 1)) * 100);
                 progressBar.value = percent;
                 progressBar.max = 100;
-                progressText.setText(`${t("settings.ragSyncingFile")}: ${progress.filePath} (${progress.current}/${progress.total})`);
+                if (progress.phase === "embedding") {
+                  progressText.setText(`${t("settings.ragSyncingEmbeddings")}: ${progress.filePath} (${progress.current}/${progress.total})`);
+                } else if (progress.phase === "saving") {
+                  progressText.setText(t("settings.ragSyncSaving"));
+                } else {
+                  progressText.setText(`${t("settings.ragSyncingFile")}: ${progress.filePath} (${progress.current}/${progress.total})`);
+                }
               },
             );
             new Notice(t("settings.ragSynced", {
