@@ -102,7 +102,7 @@ export const ja: Record<string, string> = {
   "settings.ragSourceSettings": "内部RAG設定を結合",
   "settings.ragSourceSettingsDesc": "他の内部RAG設定をまとめて検索する結合用設定として使う",
   "settings.ragSourceSettingsSelect": "結合元RAG設定",
-  "settings.ragSourceSettingsSelectDesc": "まとめて検索する内部RAG設定を選択します",
+  "settings.ragSourceSettingsSelectDesc": "EmbeddingサーバーURLとモデルが同じ内部RAG設定を選択します",
   "settings.ragSourceSettingsEmpty": "他のRAG設定がありません",
   "settings.ragExternalIndex": "外部インデックスを使用",
   "settings.ragExternalIndexDesc": "Vaultから同期する代わりにビルド済みインデックスを読み込む",

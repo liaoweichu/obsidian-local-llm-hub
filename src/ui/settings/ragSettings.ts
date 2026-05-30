@@ -16,6 +16,27 @@ interface SettingsContext {
 const EMBEDDING_BASE_URL_PLACEHOLDER = "http://localhost:8001";
 type RagSettingMode = "internal" | "combined" | "external";
 
+function effectiveEmbeddingBaseUrl(plugin: LocalLlmHubPlugin, setting: RagSetting): string {
+  return (setting.embeddingBaseUrl || plugin.settings.llmConfig.baseUrl).replace(/\/+$/, "");
+}
+
+function effectiveEmbeddingModel(setting: RagSetting): string {
+  return setting.embeddingModel || DEFAULT_RAG_SETTING.embeddingModel;
+}
+
+function hasSameEffectiveEmbeddingConfig(
+  plugin: LocalLlmHubPlugin,
+  a: RagSetting,
+  b: RagSetting,
+): boolean {
+  return effectiveEmbeddingBaseUrl(plugin, a) === effectiveEmbeddingBaseUrl(plugin, b) &&
+    effectiveEmbeddingModel(a) === effectiveEmbeddingModel(b);
+}
+
+function isStandaloneInternalRag(setting: RagSetting): boolean {
+  return !setting.externalIndexPath && setting.sourceRagSettings.length === 0;
+}
+
 export function displayRagSettings(containerEl: HTMLElement, ctx: SettingsContext): void {
   const { plugin, display } = ctx;
 
@@ -92,6 +113,15 @@ function displaySelectedRagSetting(
   const isExternal = !!ragSetting.externalIndexPath;
   const isBundle = ragSetting.sourceRagSettings.length > 0;
   const mode: RagSettingMode = isBundle ? "combined" : isExternal ? "external" : "internal";
+  const sourceReferenceSetting = ragSetting.sourceRagSettings
+    .map(sourceName => plugin.getRagSetting(sourceName))
+    .find((source): source is RagSetting => !!source && isStandaloneInternalRag(source));
+  const sourceNames = plugin.getRagSettingNames().filter(sourceName => {
+    if (sourceName === name) return false;
+    const source = plugin.getRagSetting(sourceName);
+    if (!source || !isStandaloneInternalRag(source)) return false;
+    return !sourceReferenceSetting || hasSameEffectiveEmbeddingConfig(plugin, source, sourceReferenceSetting);
+  });
 
   const updateSetting = async (updates: Partial<RagSetting>) => {
     await plugin.updateRagSetting(name, updates);
@@ -164,9 +194,8 @@ function displaySelectedRagSetting(
         .setValue(mode)
         .onChange((value) => {
           const nextMode = value as RagSettingMode;
-          const defaultSource = plugin.getRagSettingNames().filter(sourceName => sourceName !== name).slice(0, 1);
           const sourceRagSettings = nextMode === "combined"
-            ? (ragSetting.sourceRagSettings.length > 0 ? ragSetting.sourceRagSettings : defaultSource)
+            ? (ragSetting.sourceRagSettings.length > 0 ? ragSetting.sourceRagSettings : sourceNames.slice(0, 1))
             : [];
           const externalIndexPath = nextMode === "external" ? (ragSetting.externalIndexPath || " ") : "";
           void (async () => {
@@ -178,7 +207,6 @@ function displaySelectedRagSetting(
     });
 
   if (isBundle) {
-    const sourceNames = plugin.getRagSettingNames().filter(sourceName => sourceName !== name);
     const sourceSetting = new Setting(containerEl)
       .setName(t("settings.ragSourceSettingsSelect"))
       .setDesc(t("settings.ragSourceSettingsSelectDesc"));

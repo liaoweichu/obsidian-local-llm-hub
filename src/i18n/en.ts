@@ -102,7 +102,7 @@ export const en = {
   "settings.ragSourceSettings": "Combine internal rag settings",
   "settings.ragSourceSettingsDesc": "Use this setting as a combined search view over other internal rag settings",
   "settings.ragSourceSettingsSelect": "Source rag settings",
-  "settings.ragSourceSettingsSelectDesc": "Select the internal rag settings to search together",
+  "settings.ragSourceSettingsSelectDesc": "Select internal rag settings with the same embedding server URL and model to search together",
   "settings.ragSourceSettingsEmpty": "No other rag settings available",
   "settings.ragExternalIndex": "Use external index",
   "settings.ragExternalIndexDesc": "Load a pre-built index instead of syncing from the vault",
