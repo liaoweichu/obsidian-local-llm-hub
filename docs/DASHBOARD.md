@@ -75,15 +75,11 @@ Each dashboard opens in **view mode**. Use the toolbar to switch:
 
 In edit mode, click **+ Add widget** to choose a widget type:
 
-![Add widget palette](images/dashboard_widgets.png)
-
 ### Base — embed a Bases view
 
 Renders a named view of a `.base` file using Obsidian's **native Bases UI**
 (table / cards / list / map). This is the primary data widget — use it for any
 list, table, or card view of notes rather than reimplementing one.
-
-![Base widget settings](images/dashboard_base.png)
 
 | Setting | Description |
 |---------|-------------|
@@ -99,8 +95,6 @@ one widget per view (Active / Done / Backlog).
 Renders an existing markdown note inline as a read-only embed (with a link to
 open the full note).
 
-![Markdown widget settings](images/dashboard_markdown.png)
-
 | Setting | Description |
 |---------|-------------|
 | **Markdown note** | Vault path to the note to embed (searchable picker) |
@@ -108,8 +102,6 @@ open the full note).
 ### Web Embed — embed a web page
 
 Embeds a web page in an iframe.
-
-![Web Embed widget settings](images/dashboard_web.png)
 
 | Setting | Description |
 |---------|-------------|
@@ -124,8 +116,6 @@ Embeds a web page in an iframe.
 Runs an existing [workflow](WORKFLOW_NODES.md) **headlessly** and renders its
 output as Markdown or HTML. This lets you put dynamic, generated content
 (digests, summaries, reports) on a dashboard.
-
-![Workflow widget settings](images/dashboard_workflow.png)
 
 | Setting | Description |
 |---------|-------------|
@@ -160,7 +150,7 @@ preview its note in a modal; the modal's open icon navigates to the note in a
 new tab. The board is interactive in **view mode** — no need to enter edit mode
 to drag cards.
 
-![Kanban board](images/dashboard_kanban.png)
+![Kanban board](images/dashboard.png)
 
 The board header shows an optional **title** (handy when a dashboard holds
 several boards) and a **New** button. New opens a small modal to enter the card
@@ -171,7 +161,7 @@ on the dashboard); click it when you want to open the note.
 
 Configure the board from the widget settings in edit mode:
 
-![Kanban settings](images/dashboard_kanban_edit.png)
+![Kanban settings](images/kanban_edit.png)
 
 | Setting | Description |
 |---------|-------------|

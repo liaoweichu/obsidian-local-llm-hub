@@ -103,6 +103,8 @@ backing `.base` files from chat.
 
 ![Dashboard](docs/images/dashboard.png)
 
+![Kanban dashboard settings](docs/images/kanban_edit.png)
+
 See [DASHBOARD.md](docs/DASHBOARD.md) for the complete dashboard guide and file
 format.
 

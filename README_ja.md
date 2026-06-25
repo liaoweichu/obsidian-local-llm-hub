@@ -97,6 +97,8 @@ Workflow ウィジェットは sidecar cache を表示するため、重い work
 
 ![Dashboard](docs/images/dashboard.png)
 
+![Kanban dashboard settings](docs/images/kanban_edit.png)
+
 Dashboard の使い方とファイル形式の詳細は [DASHBOARD_ja.md](docs/DASHBOARD_ja.md) を参照してください。
 
 ---
