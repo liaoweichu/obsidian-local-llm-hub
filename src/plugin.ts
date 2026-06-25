@@ -1,6 +1,10 @@
 import { Plugin, WorkspaceLeaf, MarkdownView, Notice, Modal, TFile, type Editor } from "obsidian";
 import { ChatView, VIEW_TYPE_LLM_CHAT } from "src/ui/ChatView";
 import { CryptView, CRYPT_VIEW_TYPE } from "src/ui/CryptView";
+import { DashboardView, DASHBOARD_VIEW_TYPE } from "src/ui/DashboardView";
+import { registerCoreWidgets } from "src/dashboard/widgets/registry";
+import { dashboardPath, serializeDashboard, createEmptyDashboard, ensureVaultFolder } from "src/dashboard/dashboardFile";
+import { DASHBOARD_FOLDER } from "src/dashboard/types";
 import { SettingsTab } from "src/ui/SettingsTab";
 import { type LocalLlmHubSettings, type RagSetting, DEFAULT_SETTINGS } from "src/types";
 import { WorkspaceStateManager } from "src/core/workspaceStateManager";
@@ -99,6 +103,20 @@ export class LocalLlmHubPlugin extends Plugin {
       CRYPT_VIEW_TYPE,
       (leaf) => new CryptView(leaf, this)
     );
+
+    // Dashboard view (.dashboard files: widget grid over bases/notes/web)
+    registerCoreWidgets();
+    this.registerView(
+      DASHBOARD_VIEW_TYPE,
+      (leaf) => new DashboardView(leaf, this)
+    );
+
+    // Register .dashboard extension so Obsidian opens these files in DashboardView
+    try {
+      this.registerExtensions(["dashboard"], DASHBOARD_VIEW_TYPE);
+    } catch {
+      // Extension already registered by another plugin — skip
+    }
 
     // Workflow code block: render as Mermaid diagram (Reading mode + Live Preview)
     registerWorkflowCodeBlockProcessor(this, this.app);
@@ -264,6 +282,15 @@ export class LocalLlmHubPlugin extends Plugin {
       },
     });
 
+    // Dashboard command
+    this.addCommand({
+      id: "create-dashboard",
+      name: t("command.createDashboard"),
+      callback: () => {
+        void this.createDashboard();
+      },
+    });
+
     // Encrypt/Decrypt commands
     this.addCommand({
       id: "encrypt-file",
@@ -311,6 +338,33 @@ export class LocalLlmHubPlugin extends Plugin {
         new EditHistoryModal(this.app, file.path).open();
       },
     });
+  }
+
+  /**
+   * Create a new empty `.dashboard` file under `Dashboards/` and open it.
+   * Picks a unique "Dashboard", "Dashboard 2", … name.
+   */
+  async createDashboard(): Promise<void> {
+    const { vault, workspace } = this.app;
+
+    let name = "Dashboard";
+    let path = dashboardPath(name);
+    for (let i = 2; vault.getAbstractFileByPath(path); i++) {
+      name = `Dashboard ${i}`;
+      path = dashboardPath(name);
+    }
+
+    let file: TFile;
+    try {
+      await ensureVaultFolder(vault, DASHBOARD_FOLDER);
+      file = await vault.create(path, serializeDashboard(createEmptyDashboard()));
+    } catch (error) {
+      new Notice(`Failed to create dashboard: ${String(error)}`);
+      return;
+    }
+
+    const leaf = workspace.getLeaf(true);
+    await leaf.openFile(file);
   }
 
   private async saveSnapshotForFile(file: TFile): Promise<void> {

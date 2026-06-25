@@ -51,6 +51,9 @@ export interface AIWorkflowModalOptions {
   isSkill?: boolean;
   /** Existing skill instructions (SKILL.md body), passed when modifying a skill. */
   existingInstructions?: string;
+  /** Extra model-facing instructions appended to the user's request on every
+   *  generation (e.g. an output-format contract for dashboard workflow widgets). */
+  appendInstructions?: string;
 }
 
 /** Context from the generation phases, shown in preview/confirm modals */
@@ -357,6 +360,9 @@ export class AIWorkflowModal extends Modal {
   private forceSkill = false;
   /** Existing skill instructions (SKILL.md body), passed when modifying a skill. */
   private existingInstructions?: string;
+  /** Extra model-facing instructions appended to the user's request (e.g. an
+   *  output-format contract for dashboard workflow widgets). */
+  private appendInstructions?: string;
   private resolvePromise: (result: AIWorkflowResult | null) => void;
 
   private nameInputEl: HTMLInputElement | null = null;
@@ -418,6 +424,7 @@ export class AIWorkflowModal extends Modal {
     this.defaultOutputPath = defaultOutputPath;
     this.forceSkill = options?.isSkill ?? false;
     this.existingInstructions = options?.existingInstructions;
+    this.appendInstructions = options?.appendInstructions;
   }
 
   onOpen(): void {
@@ -744,6 +751,25 @@ export class AIWorkflowModal extends Modal {
   }
 
   /**
+   * For non-skill workflow creation, refuse to continue when the target markdown
+   * file already contains a workflow block. This runs before expensive AI
+   * generation and again before accepting pasted/generated output.
+   */
+  private async rejectIfTargetHasWorkflow(outputPath: string): Promise<boolean> {
+    if (this.forceSkill) return false;
+
+    const path = outputPath.endsWith(".md") ? outputPath : `${outputPath}.md`;
+    const existing = this.app.vault.getAbstractFileByPath(path);
+    if (!(existing instanceof TFile)) return false;
+
+    const existingContent = await this.app.vault.cachedRead(existing);
+    if (findWorkflowBlocks(existingContent).length === 0) return false;
+
+    new Notice(t("workflow.generation.outputPathTaken", { path }));
+    return true;
+  }
+
+  /**
    * Apply a pasted response from an external LLM.
    * Create mode: saves raw markdown with workflow code blocks.
    * Modify mode: parses YAML and returns nodes.
@@ -775,23 +801,6 @@ export class AIWorkflowModal extends Modal {
     if (this.mode === "create") {
       const isSkill = this.forceSkill;
 
-      // For non-skill create: refuse when the target already holds a workflow
-      // block. The modal stays open so the user can edit the output path
-      // (same UX as picking a fresh name up front) instead of us silently
-      // clobbering or suffixing the path downstream.
-      const rejectIfTargetHasWorkflow = async (outputPath: string): Promise<boolean> => {
-        if (isSkill) return false;
-        const path = outputPath.endsWith(".md") ? outputPath : `${outputPath}.md`;
-        const existing = this.app.vault.getAbstractFileByPath(path);
-        if (!(existing instanceof TFile)) return false;
-        const existingContent = await this.app.vault.cachedRead(existing);
-        if (findWorkflowBlocks(existingContent).length > 0) {
-          new Notice(t("workflow.generation.outputPathTaken", { path }));
-          return true;
-        }
-        return false;
-      };
-
       // Create mode: save markdown directly (validate it has workflow blocks)
       const options = findWorkflowBlocks(pastedText);
       if (options.length === 0) {
@@ -815,7 +824,7 @@ export class AIWorkflowModal extends Modal {
             parsed.skillInstructions = parsed.explanation.replace(/\n---\s*$/, "").trim();
           }
         }
-        if (await rejectIfTargetHasWorkflow(parsed.outputPath)) return;
+        if (await this.rejectIfTargetHasWorkflow(parsed.outputPath)) return;
         this.resolvePromise(parsed);
         this.close();
         return;
@@ -849,7 +858,7 @@ export class AIWorkflowModal extends Modal {
         rawMarkdown: workflowMarkdown,
         skillInstructions,
       };
-      if (await rejectIfTargetHasWorkflow(result.outputPath!)) return;
+      if (await this.rejectIfTargetHasWorkflow(result.outputPath!)) return;
       this.resolvePromise(result);
       this.close();
     } else {
@@ -897,6 +906,11 @@ export class AIWorkflowModal extends Modal {
     const outputPathTemplate = this.mode === "create"
       ? this.outputPathEl?.value?.trim() || `${WORKFLOWS_FOLDER}/{{name}}/main`
       : undefined;
+
+    if (this.mode === "create" && outputPathTemplate) {
+      const outputPath = outputPathTemplate.replace(/\{\{name\}\}/g, workflowName);
+      if (await this.rejectIfTargetHasWorkflow(outputPath)) return;
+    }
 
     // Resolve @ mentions (embed file content, selection, etc.)
     const { resolved: resolvedDescription, mentions: resolvedMentions } = await this.resolveMentions(description);
@@ -1120,7 +1134,7 @@ Fix the problem and output ONLY the complete, valid YAML workflow starting with 
 
         const reviewResult = await this.runReviewPhase(
           config, currentRequest, plan || "", result.yaml, isSkill,
-          generationModal, abortController.signal, isCancelled
+          this.appendInstructions, generationModal, abortController.signal, isCancelled
         );
         critiqueResult = reviewResult.review;
         totalUsage = mergeUsage(totalUsage, reviewResult.usage);
@@ -1176,7 +1190,7 @@ Fix the problem and output ONLY the complete, valid YAML workflow starting with 
         generationModal.appendThinkingSeparator(t("workflow.generation.reviewRefining"));
         const refinement = await this.runRefinementPass(
           config, currentRequest, plan || "", result.yaml, result.explanation,
-          critiqueResult, systemPrompt, isSkill, generationModal, abortController.signal, isCancelled
+          critiqueResult, systemPrompt, isSkill, this.appendInstructions, generationModal, abortController.signal, isCancelled
         );
         totalUsage = mergeUsage(totalUsage, refinement.usage);
 
@@ -1405,6 +1419,7 @@ ${currentRequest}${existingContext}`;
     plan: string,
     generatedYaml: string,
     isSkill: boolean,
+    appendInstructions: string | undefined,
     generationModal: WorkflowGenerationModal,
     signal: AbortSignal,
     isCancelled: () => boolean
@@ -1456,11 +1471,15 @@ IMPORTANT:
 
     const entityType = isSkill ? "skill" : "workflow";
     const planSection = plan ? `\nPLAN:\n${plan}\n` : "";
+    const activeRequirementsSection = appendInstructions
+      ? `\nADDITIONAL ACTIVE REQUIREMENTS:\n${appendInstructions}\n`
+      : "";
     const reviewUserPrompt = `Review this generated ${entityType}:
 
 ORIGINAL REQUEST:
 ${currentRequest}
 ${planSection}
+${activeRequirementsSection}
 GENERATED YAML:
 ${generatedYaml}`;
 
@@ -1509,6 +1528,7 @@ ${generatedYaml}`;
     review: ReviewResult,
     systemPrompt: string,
     isSkill: boolean,
+    appendInstructions: string | undefined,
     generationModal: WorkflowGenerationModal,
     signal: AbortSignal,
     isCancelled: () => boolean
@@ -1518,6 +1538,9 @@ ${generatedYaml}`;
       .join("\n");
 
     const planSection = plan ? `\nPLAN:\n${plan}\n` : "";
+    const activeRequirementsSection = appendInstructions
+      ? `\nADDITIONAL ACTIVE REQUIREMENTS:\n${appendInstructions}\n`
+      : "";
 
     let generatedOutput: string;
     let outputInstruction: string;
@@ -1540,6 +1563,7 @@ ${generatedYaml}`;
 ORIGINAL REQUEST:
 ${currentRequest}
 ${planSection}
+${activeRequirementsSection}
 ${generatedOutput}
 
 ${feedbackSection}
@@ -1694,6 +1718,28 @@ ${outputRules}`;
   }
 
   private buildUserPrompt(
+    currentRequest: string,
+    workflowName?: string,
+    previousYaml?: string,
+    requestHistory: string[] = [],
+    selectedExecutionSteps?: ExecutionStep[],
+    isSkill = false,
+    plan?: string
+  ): string {
+    const body = this.buildUserPromptBody(
+      currentRequest, workflowName, previousYaml, requestHistory,
+      selectedExecutionSteps, isSkill, plan
+    );
+    return this.appendInstructions ? `${body}\n\n${this.appendInstructions}` : body;
+  }
+
+  /**
+   * Build the generation user prompt body. `appendInstructions` (e.g. the
+   * dashboard widget's headless output contract) is re-asserted by the
+   * buildUserPrompt wrapper on every generation — including revisions — so it
+   * stays active even when the original request is demoted to history.
+   */
+  private buildUserPromptBody(
     currentRequest: string,
     workflowName?: string,
     previousYaml?: string,

@@ -116,10 +116,16 @@ export class WorkflowGenerationModal extends Modal {
     // Hidden until the model emits real thinking content — models without
     // reasoning output would otherwise show an empty panel with just phase
     // separators.
-    const thinkingSection = contentEl.createDiv({ cls: "llm-hub-workflow-generation-thinking-section is-hidden" });
-    thinkingSection.createEl("h3", { text: t("workflow.generation.thinking") });
-    this.thinkingSectionEl = thinkingSection;
-    this.thinkingContainerEl = thinkingSection.createDiv({ cls: "llm-hub-workflow-generation-thinking" });
+    const thinkingDetails = contentEl.createEl("details", {
+      cls: "llm-hub-workflow-generation-thinking-details is-hidden",
+    });
+    const thinkingSummary = thinkingDetails.createEl("summary", { cls: "llm-hub-thinking-summary" });
+    thinkingSummary.createSpan({ text: t("workflow.generation.thinking") });
+    createCopyButton(thinkingSummary, () => this.thinkingText);
+    this.thinkingSectionEl = thinkingDetails;
+    this.thinkingContainerEl = thinkingDetails.createEl("pre", {
+      cls: "llm-hub-thinking-content llm-hub-workflow-generation-thinking",
+    });
 
     this.reviewSectionEl = contentEl.createDiv({ cls: "llm-hub-workflow-generation-review-section is-hidden" });
     const reviewHeader = this.reviewSectionEl.createDiv({ cls: "llm-hub-workflow-generation-section-header" });
