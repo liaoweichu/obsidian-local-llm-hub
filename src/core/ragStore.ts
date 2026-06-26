@@ -1024,6 +1024,84 @@ export function chunkText(
   return chunks;
 }
 
+/**
+ * Split text into chunks on sentence terminators (English ". " and Chinese "。"),
+ * accumulating sentences until adding the next would exceed chunkSize.
+ * Falls back to a single chunk when no terminators are present.
+ * Each chunk records its startOffset in the original text.
+ */
+export function chunkBySentence(
+  text: string,
+  chunkSize: number,
+  chunkOverlap: number,
+): { text: string; startOffset: number }[] {
+  const chunks: { text: string; startOffset: number }[] = [];
+  if (text.length === 0) return chunks;
+
+  // Find all sentence boundary end indices (index just past the terminator).
+  const terminatorPattern = /[。\.]\s*/g;
+  const boundaries: number[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = terminatorPattern.exec(text)) !== null) {
+    boundaries.push(match.index + match[0].length);
+  }
+
+  // No terminators -> single chunk (even if it exceeds chunkSize)
+  if (boundaries.length === 0) {
+    const trimmed = text.trim();
+    if (trimmed) chunks.push({ text: trimmed, startOffset: 0 });
+    return chunks;
+  }
+
+  // Build sentence spans [start, end) using boundaries.
+  const spans: { start: number; end: number }[] = [];
+  let prevEnd = 0;
+  for (const end of boundaries) {
+    spans.push({ start: prevEnd, end });
+    prevEnd = end;
+  }
+  // Trailing text after the last terminator
+  if (prevEnd < text.length) {
+    spans.push({ start: prevEnd, end: text.length });
+  }
+
+  let chunkStart = 0;
+  let spanIdx = 0;
+
+  while (chunkStart < text.length) {
+    // Advance spanIdx to the first span ending after chunkStart.
+    while (spanIdx < spans.length && spans[spanIdx].end <= chunkStart) {
+      spanIdx++;
+    }
+    if (spanIdx >= spans.length) break;
+
+    // Greedily accumulate whole sentences starting from chunkStart.
+    let accEnd = spans[spanIdx].end;
+    let j = spanIdx + 1;
+    while (j < spans.length && accEnd - chunkStart + (spans[j].end - spans[j].start) <= chunkSize) {
+      accEnd = spans[j].end;
+      j++;
+    }
+
+    const chunkStr = text.slice(chunkStart, accEnd).trim();
+    if (chunkStr) {
+      chunks.push({ text: chunkStr, startOffset: chunkStart });
+    }
+
+    if (accEnd >= text.length) break;
+
+    // Overlap: step back by chunkOverlap chars (character-level; may start mid-sentence).
+    let nextStart = accEnd - chunkOverlap;
+    // Guarantee forward progress; if overlap would not advance, jump to accEnd.
+    if (nextStart <= chunkStart) {
+      nextStart = accEnd;
+    }
+    chunkStart = nextStart;
+  }
+
+  return chunks;
+}
+
 export function simpleChecksum(content: string): string {
   let hash = 0;
   for (let i = 0; i < content.length; i++) {

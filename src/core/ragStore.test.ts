@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   chunkText,
+  chunkBySentence,
   cosineSimilarity,
   simpleChecksum,
   simpleChecksumBytes,
@@ -256,5 +257,83 @@ describe("simpleChecksumBytes", () => {
   it("returns different results for different bytes", () => {
     expect(simpleChecksumBytes(new Uint8Array([1, 2, 3]).buffer))
       .not.toBe(simpleChecksumBytes(new Uint8Array([1, 2, 4]).buffer));
+  });
+});
+
+// --- chunkBySentence ---
+
+describe("chunkBySentence", () => {
+  it("returns empty array for empty text", () => {
+    expect(chunkBySentence("", 1000, 200)).toHaveLength(0);
+  });
+
+  it("returns a single chunk when text fits chunkSize", () => {
+    const text = "Hello world. Foo bar.";
+    const result = chunkBySentence(text, 1000, 200);
+    expect(result).toHaveLength(1);
+    expect(result[0].text).toBe("Hello world. Foo bar.");
+    expect(result[0].startOffset).toBe(0);
+  });
+
+  it("splits on English period followed by whitespace", () => {
+    const text = "First sentence. Second sentence. Third sentence.";
+    const result = chunkBySentence(text, 25, 0);
+    expect(result.length).toBeGreaterThan(1);
+    // Each emitted chunk (except possibly the last) should not exceed chunkSize
+    for (const chunk of result) {
+      expect(chunk.text.length).toBeLessThanOrEqual(25);
+    }
+    // startOffset values must be valid indices into the original text
+    for (const chunk of result) {
+      expect(chunk.startOffset).toBeGreaterThanOrEqual(0);
+      expect(chunk.startOffset).toBeLessThan(text.length);
+      expect(text.startsWith(chunk.text.trimStart(), chunk.startOffset)).toBe(true);
+    }
+  });
+
+  it("splits on Chinese full-width period 。", () => {
+    const text = "这是第一句话。这是第二句话。这是第三句话。";
+    const result = chunkBySentence(text, 12, 0);
+    expect(result.length).toBeGreaterThan(1);
+    for (const chunk of result) {
+      expect(chunk.text.length).toBeLessThanOrEqual(12);
+    }
+  });
+
+  it("groups multiple sentences into one chunk until chunkSize is exceeded", () => {
+    const text = "A. B. C. D. E. F. G. H.";
+    const result = chunkBySentence(text, 8, 0);
+    // Each chunk holds as many whole sentences as fit within 8 chars
+    expect(result.length).toBeGreaterThan(1);
+    for (const chunk of result) {
+      expect(chunk.text.length).toBeLessThanOrEqual(8);
+    }
+  });
+
+  it("carries overlap into the next chunk", () => {
+    const text = "Sentence one here. Sentence two here. Sentence three here. Sentence four here.";
+    const result = chunkBySentence(text, 25, 10);
+    expect(result.length).toBeGreaterThan(1);
+    // With overlap, a later chunk should start before the previous chunk ended
+    expect(result[1].startOffset).toBeLessThan(result[0].startOffset + result[0].text.length);
+  });
+
+  it("falls back to a single chunk when no terminators present", () => {
+    const text = "no terminators here just plain words running on and on";
+    const result = chunkBySentence(text, 30, 5);
+    // No sentence boundary -> one chunk (length may exceed chunkSize since no split point)
+    expect(result).toHaveLength(1);
+    expect(result[0].text).toBe(text);
+    expect(result[0].startOffset).toBe(0);
+  });
+
+  it("records correct startOffset for each chunk", () => {
+    const text = "One. Two. Three. Four. Five.";
+    const result = chunkBySentence(text, 12, 0);
+    // The concatenation of slice(text, startOffset, startOffset + text.length)
+    // must reproduce the chunk text (trimmed-end tolerance handled by checking startsWith)
+    for (const chunk of result) {
+      expect(text.startsWith(chunk.text, chunk.startOffset)).toBe(true);
+    }
   });
 });
