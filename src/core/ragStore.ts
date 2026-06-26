@@ -242,11 +242,14 @@ class RagStore {
     let { index, vectors } = entry;
     const incompatible = entry.incompatibleIndexLoaded;
 
-    // Check if chunk params changed → full rebuild needed
+    // Check if chunk params changed → full rebuild needed.
+    // Compare chunkStrategy with defaults on BOTH sides so existing indexes
+    // (whose chunkStrategy is undefined) don't trigger a spurious rebuild when
+    // the effective strategy is still "fixed".
     const needsFullRebuild = !incompatible && index !== null && (
       index.chunkSize !== ragSetting.chunkSize ||
       index.chunkOverlap !== ragSetting.chunkOverlap ||
-      index.chunkStrategy !== (ragSetting.chunkStrategy ?? "fixed")
+      (index.chunkStrategy ?? "fixed") !== (ragSetting.chunkStrategy ?? "fixed")
     );
 
     if (incompatible || needsFullRebuild) {

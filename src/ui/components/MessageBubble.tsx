@@ -157,7 +157,7 @@ export default function MessageBubble({
                     <span
                       key={index}
                       className="llm-hub-rag-source"
-                      title={citation.snippet}
+                      title={t("message.ragCitationOpen")}
                       onClick={() => {
                         const isPdf = citation.filePath.toLowerCase().endsWith(".pdf");
                         if (isPdf) {
@@ -363,7 +363,10 @@ async function openWorkflowInPanel(app: App, workflowPath: string): Promise<void
 
 /**
  * Open a Markdown file and scroll the editor to the chunk location.
- * Tries heading-line match first, then falls back to startOffset.
+ * Prefers startOffset (most precise: maps directly to the retrieved chunk),
+ * then falls back to the nearest heading if the offset is out of range
+ * (e.g. the note was edited after indexing). startOffset-first avoids
+ * jumping to the wrong heading when a note has duplicate heading text.
  * Wrapped in try/catch so a failure to scroll still opens the file.
  */
 async function scrollEditorToOffset(
@@ -380,8 +383,14 @@ async function scrollEditorToOffset(
     const value = editor.getValue();
 
     let line = -1;
-    if (heading && heading.trim().length > 0) {
-      // Match a Markdown heading line whose text equals `heading`.
+    // Primary: convert startOffset to a line number by counting newlines.
+    if (startOffset >= 0 && startOffset <= value.length) {
+      const upTo = value.slice(0, startOffset);
+      line = upTo.split("\n").length - 1;
+      if (line < 0) line = 0;
+    }
+    // Fallback: offset drifted (note edited) -> match nearest heading text.
+    if (line < 0 && heading && heading.trim().length > 0) {
       const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       const headingRe = new RegExp(`^#{1,6}\\s+${escaped}\\s*$`, "m");
       const m = value.match(headingRe);
@@ -389,12 +398,7 @@ async function scrollEditorToOffset(
         line = value.slice(0, m.index).split("\n").length - 1;
       }
     }
-    if (line < 0) {
-      // Fallback: convert startOffset to a line number by counting newlines.
-      const upTo = value.slice(0, Math.min(startOffset, value.length));
-      line = upTo.split("\n").length - 1;
-      if (line < 0) line = 0;
-    }
+    if (line < 0) line = 0;
 
     const pos = { line, ch: 0 };
     editor.setCursor(pos);

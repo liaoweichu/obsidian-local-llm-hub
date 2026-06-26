@@ -23,12 +23,16 @@ export const DEFAULT_LOCAL_LLM_CONFIG: LocalLlmConfig = {
 // RAG chunking strategy
 export type ChunkStrategy = "fixed" | "sentence" | "block";
 
-// One cited RAG chunk with its location in the source document
+// One cited RAG chunk with its location in the source document.
+// NOTE: note-content excerpts (e.g. `snippet`) are intentionally NOT persisted
+// here, because ragCitations are serialized into saved chat history. Only the
+// location fields needed for navigation are kept; tooltip previews are derived
+// at runtime from the chunk text.
 export interface RagCitation {
   filePath: string;
   heading?: string;      // nearest Markdown heading ("" when none)
   startOffset: number;   // chunk start offset in the source document
-  snippet: string;       // first ~120 chars of the chunk (for tooltip/preview)
+  snippet?: string;      // optional preview; NOT populated for persisted citations
   pageLabel?: string;    // PDF page range, e.g. "pages 2-5 of 24"
 }
 

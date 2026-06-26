@@ -640,11 +640,13 @@ const Chat = forwardRef<ChatRef, ChatProps>(({ plugin }, ref) => {
               // Back-compat: deduped file paths for old saved chats.
               ragSources = [...new Set(results.map(r => r.filePath))];
               // New: one citation per result chunk, preserving order.
+              // Only location fields are stored; `snippet` is intentionally omitted
+              // because ragCitations are serialized into chat history (no note content
+              // in saved chats). Tooltip preview is derived at render time from chunk text.
               ragCitations = results.map(r => ({
                 filePath: r.filePath,
                 ...(r.heading ? { heading: r.heading } : {}),
                 startOffset: r.startOffset,
-                snippet: r.text.slice(0, 120),
                 ...(r.pageLabel ? { pageLabel: r.pageLabel } : {}),
               }));
               const ragContext = results
